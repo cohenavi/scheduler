@@ -295,3 +295,24 @@ backupRouter.post('/restore', async (req, res) => {
     res.status(500).json({ error: 'Failed to restore backup' });
   }
 });
+
+// Reset all schedule/roster/assignment data to start from scratch (preserves admin password in appSetting)
+backupRouter.post('/reset', async (_req, res) => {
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.templateEntry.deleteMany();
+      await tx.scheduleTemplate.deleteMany();
+      await tx.constraintRule.deleteMany();
+      await tx.shift.deleteMany();
+      await tx.unavailability.deleteMany();
+      await tx.person.deleteMany();
+      await tx.assignmentType.deleteMany();
+      await tx.category.deleteMany();
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Database reset error:', err);
+    res.status(500).json({ error: 'Failed to reset database' });
+  }
+});
+

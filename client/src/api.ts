@@ -295,10 +295,15 @@ export const api = {
       `/api/admin/analytics?startDate=${startDate}&endDate=${endDate}&viewMode=${viewMode}`
     ),
 
-  // Restore
+  // Restore & Reset
   restoreBackup: (bundle: unknown) =>
     request<{ success: boolean; restoredCounts: Record<string, number> }>('/api/admin/restore', {
       method: 'POST',
       body: JSON.stringify(bundle),
+    }),
+
+  resetDatabase: () =>
+    request<{ success: boolean }>('/api/admin/reset', {
+      method: 'POST',
     }),
 };

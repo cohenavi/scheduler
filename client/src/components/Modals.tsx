@@ -1020,6 +1020,9 @@ export const SettingsModal: React.FC<{
     bundle: unknown;
   } | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1067,6 +1070,26 @@ export const SettingsModal: React.FC<{
       setStatus({ type: 'err', msg: err instanceof Error ? err.message : 'Restore failed' });
     } finally {
       setRestoring(false);
+    }
+  };
+
+  const handleConfirmReset = async () => {
+    if (resetConfirmText.trim().toUpperCase() !== 'RESET') return;
+    setResetting(true);
+    setStatus(null);
+    try {
+      await api.resetDatabase();
+      setShowResetConfirm(false);
+      setResetConfirmText('');
+      setStatus({
+        type: 'ok',
+        msg: 'All people, categories, assignments, shifts, PTO, rules, and templates have been cleared.',
+      });
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      setStatus({ type: 'err', msg: err instanceof Error ? err.message : 'Reset failed' });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -1171,6 +1194,69 @@ export const SettingsModal: React.FC<{
               </div>
             )}
           </div>
+        </div>
+
+        {/* Reset All Data (Start from Scratch) */}
+        <div className="space-y-2.5 border-t border-slate-200 pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-red-700">
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Start from Scratch (Reset All Data)</span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Permanently deletes all staff, categories, assignments, shifts, PTO, rules, and
+                templates. Your admin password is preserved.
+              </p>
+            </div>
+            {!showResetConfirm && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStatus(null);
+                  setShowResetConfirm(true);
+                }}
+                className="shrink-0 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+              >
+                Reset Data...
+              </button>
+            )}
+          </div>
+
+          {showResetConfirm && (
+            <div className="space-y-2.5 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-950">
+              <div className="font-semibold">
+                Are you sure? Download a backup first if you may need this data later.
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={resetConfirmText}
+                  onChange={(e) => setResetConfirmText(e.target.value)}
+                  placeholder='Type "RESET" to confirm'
+                  className="w-44 rounded border border-red-300 bg-white px-2.5 py-1 text-xs text-slate-900 focus:border-red-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={resetting || resetConfirmText.trim().toUpperCase() !== 'RESET'}
+                  onClick={handleConfirmReset}
+                  className="rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {resetting ? 'Resetting...' : 'Permanently Wipe & Start Fresh'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowResetConfirm(false);
+                    setResetConfirmText('');
+                  }}
+                  className="rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {status && (
