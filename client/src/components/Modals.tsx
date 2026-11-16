@@ -1060,9 +1060,42 @@ export const SettingsModal: React.FC<{
     bundle: unknown;
   } | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [exportSections, setExportSections] = useState<string[]>([
+    'people',
+    'categories',
+    'assignments',
+    'rules',
+    'templates',
+  ]);
+  const [configPreview, setConfigPreview] = useState<{
+    filename: string;
+    counts: Record<string, number>;
+    bundle: unknown;
+  } | null>(null);
+  const [importSections, setImportSections] = useState<string[]>([
+    'people',
+    'categories',
+    'assignments',
+    'rules',
+    'templates',
+  ]);
+  const [importMode, setImportMode] = useState<'MERGE' | 'REPLACE_SELECTED'>('MERGE');
+  const [importingConfig, setImportingConfig] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [resetting, setResetting] = useState(false);
+
+  const CONFIG_SECTIONS: { id: string; label: string; countKey: string }[] = [
+    { id: 'people', label: 'Staff Roster', countKey: 'people' },
+    { id: 'categories', label: 'Categories', countKey: 'categories' },
+    { id: 'assignments', label: 'Assignments', countKey: 'assignmentTypes' },
+    { id: 'rules', label: 'Rules', countKey: 'constraintRules' },
+    { id: 'templates', label: 'Rotation Templates', countKey: 'scheduleTemplates' },
+  ];
+
+  const toggleSection = (list: string[], setList: (v: string[]) => void, id: string) => {
+    setList(list.includes(id) ? list.filter((s) => s !== id) : [...list, id]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1110,6 +1143,70 @@ export const SettingsModal: React.FC<{
       setStatus({ type: 'err', msg: err instanceof Error ? err.message : 'Restore failed' });
     } finally {
       setRestoring(false);
+    }
+  };
+
+  const handleConfigFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setStatus(null);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || parsed.version !== 1 || !parsed.data) {
+        throw new Error('Invalid configuration JSON file.');
+      }
+      const counts: Record<string, number> = {
+        people: Array.isArray(parsed.data.people) ? parsed.data.people.length : 0,
+        categories: Array.isArray(parsed.data.categories) ? parsed.data.categories.length : 0,
+        assignmentTypes: Array.isArray(parsed.data.assignmentTypes)
+          ? parsed.data.assignmentTypes.length
+          : 0,
+        constraintRules: Array.isArray(parsed.data.constraintRules)
+          ? parsed.data.constraintRules.length
+          : 0,
+        scheduleTemplates: Array.isArray(parsed.data.scheduleTemplates)
+          ? parsed.data.scheduleTemplates.length
+          : 0,
+      };
+      const available = CONFIG_SECTIONS.filter((s) => (counts[s.countKey] ?? 0) > 0).map((s) => s.id);
+      setImportSections(available.length > 0 ? available : CONFIG_SECTIONS.map((s) => s.id));
+      setConfigPreview({
+        filename: file.name,
+        counts,
+        bundle: parsed,
+      });
+    } catch (err) {
+      setStatus({ type: 'err', msg: err instanceof Error ? err.message : 'Failed to parse JSON' });
+    }
+  };
+
+  const handleConfirmConfigImport = async () => {
+    if (!configPreview || importSections.length === 0) return;
+    setImportingConfig(true);
+    setStatus(null);
+    try {
+      const res = await api.importConfig(configPreview.bundle, importSections, importMode);
+      const summary = [
+        res.imported.people ? `${res.imported.people} staff` : null,
+        res.imported.categories ? `${res.imported.categories} categories` : null,
+        res.imported.assignmentTypes ? `${res.imported.assignmentTypes} assignments` : null,
+        res.imported.constraintRules ? `${res.imported.constraintRules} rules` : null,
+        res.imported.scheduleTemplates ? `${res.imported.scheduleTemplates} templates` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      setStatus({
+        type: 'ok',
+        msg: summary ? `Configuration imported (${summary}).` : 'Configuration import completed.',
+      });
+      setConfigPreview(null);
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      setStatus({ type: 'err', msg: err instanceof Error ? err.message : 'Config import failed' });
+    } finally {
+      setImportingConfig(false);
     }
   };
 
@@ -1234,6 +1331,134 @@ export const SettingsModal: React.FC<{
               </div>
             )}
           </div>
+        </div>
+
+        {/* Export / Import Configuration */}
+        <div className="space-y-3 border-t border-slate-200 pt-4">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+              <Download className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Export / Import Configuration</span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Selectively export or import staff roster, categories, assignments, rules, and
+              rotation templates without touching shifts or admin settings.
+            </p>
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+              {CONFIG_SECTIONS.map((sec) => (
+                <label
+                  key={sec.id}
+                  className="flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-slate-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={exportSections.includes(sec.id)}
+                    onChange={() => toggleSection(exportSections, setExportSections, sec.id)}
+                    className="rounded border-slate-300"
+                  />
+                  <span>{sec.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {exportSections.length > 0 ? (
+                <a
+                  href={`/api/admin/config-export?sections=${exportSections.join(',')}`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Download Selected Config (.json)</span>
+                </a>
+              ) : (
+                <span className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-400">
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Select at least one section</span>
+                </span>
+              )}
+
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                <Upload className="h-3.5 w-3.5 text-slate-500" />
+                <span>Import Config (.json)</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleConfigFileSelect}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          {configPreview && (
+            <div className="space-y-2.5 rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs text-slate-800">
+              <div className="font-semibold text-blue-950">
+                Config Preview: {configPreview.filename}
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                {CONFIG_SECTIONS.map((sec) => {
+                  const count = configPreview.counts[sec.countKey] ?? 0;
+                  return (
+                    <label
+                      key={sec.id}
+                      className="flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-slate-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={importSections.includes(sec.id)}
+                        onChange={() => toggleSection(importSections, setImportSections, sec.id)}
+                        className="rounded border-slate-300"
+                      />
+                      <span>
+                        {sec.label} ({count})
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                <label className="flex cursor-pointer items-center gap-1.5 font-medium">
+                  <input
+                    type="radio"
+                    name="configImportMode"
+                    checked={importMode === 'MERGE'}
+                    onChange={() => setImportMode('MERGE')}
+                  />
+                  <span>Merge (Upsert existing &amp; add new)</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-1.5 font-medium text-amber-800">
+                  <input
+                    type="radio"
+                    name="configImportMode"
+                    checked={importMode === 'REPLACE_SELECTED'}
+                    onChange={() => setImportMode('REPLACE_SELECTED')}
+                  />
+                  <span>Replace Selected Sections</span>
+                </label>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={importingConfig || importSections.length === 0}
+                  onClick={handleConfirmConfigImport}
+                  className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {importingConfig ? 'Importing...' : 'Confirm Import'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigPreview(null)}
+                  className="rounded border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Reset All Data (Start from Scratch) */}

@@ -306,4 +306,10 @@ export const api = {
     request<{ success: boolean }>('/api/admin/reset', {
       method: 'POST',
     }),
+
+  importConfig: (bundle: unknown, sections: string[], mode: 'MERGE' | 'REPLACE_SELECTED') =>
+    request<{ success: boolean; imported: Record<string, number> }>('/api/admin/config-import', {
+      method: 'POST',
+      body: JSON.stringify({ bundle, sections, mode }),
+    }),
 };
