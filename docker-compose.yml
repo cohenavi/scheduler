@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scheduler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_strong_password}
+      POSTGRES_DB: ${POSTGRES_DB:-scheduler}
+      TZ: ${TZ:-America/Detroit}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - scheduler_internal
+    # Internal-only database: zero host ports published
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-scheduler} -d $${POSTGRES_DB:-scheduler}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scheduler-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-2800}:2800"
+    environment:
+      NODE_ENV: production
+      PORT: 2800
+      TZ: ${TZ:-America/Detroit}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-scheduler}:${POSTGRES_PASSWORD:-changeme_strong_password}@postgres:5432/${POSTGRES_DB:-scheduler}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-changeme_replace_with_64_char_random_hex_string}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+    networks:
+      - scheduler_internal
+      # Optional Reverse-Proxy Network:
+      # Uncomment the line below (and the proxy_net block at the bottom of this file)
+      # to attach scheduler-app directly to your reverse proxy network (e.g., Nginx Proxy Manager,
+      # Caddy, or Traefik) and route traffic to http://scheduler-app:2800 with SSL termination.
+      # - proxy_net
+
+volumes:
+  postgres_data:
+
+networks:
+  scheduler_internal:
+    driver: bridge
+  # Optional External Reverse-Proxy Bridge Network:
+  # Create once with `docker network create proxy_net` (or set PROXY_NETWORK in .env),
+  # then uncomment below and under `app.networks` above.
+  # proxy_net:
+  #   name: ${PROXY_NETWORK:-proxy_net}
+  #   external: true

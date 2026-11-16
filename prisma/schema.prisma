@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum TimeBlock {
+  FULL_DAY
+  AM
+  PM
+  CUSTOM
+}
+
+model Person {
+  id                 String           @id @default(cuid())
+  name               String
+  role               String
+  calendarToken      String           @unique @default(uuid())
+  maxShiftsPerWeek   Int?
+  maxHoursPerWeek    Int?
+  sortOrder          Int              @default(0)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  allowedAssignments AssignmentType[] @relation("PersonAllowedAssignments")
+  shifts             Shift[]
+  unavailabilities   Unavailability[]
+  constraintRules    ConstraintRule[]
+  templateEntries    TemplateEntry[]
+}
+
+model Category {
+  id              String           @id @default(cuid())
+  name            String           @unique
+  sortOrder       Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  assignmentTypes AssignmentType[]
+}
+
+model AssignmentType {
+  id                  String           @id @default(cuid())
+  categoryId          String
+  category            Category         @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name                String
+  shortCode           String
+  colorHex            String
+  allowedDaysOfWeek   Int[]            // 0 = Sunday .. 6 = Saturday
+  requiredStaffPerDay Int              @default(1)
+  timeBlockLabel      String           // e.g., "AM", "PM", "Full Day", "Overnight"
+  startTime           String           // "HH:mm"
+  endTime             String           // "HH:mm"
+  shortcutKey         String?          @unique
+  sortOrder           Int              @default(0)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  allowedPeople       Person[]         @relation("PersonAllowedAssignments")
+  shifts              Shift[]
+  constraintRules     ConstraintRule[]
+  templateEntries     TemplateEntry[]
+}
+
+model Shift {
+  id               String        @id @default(cuid())
+  personId         String
+  person           Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
+  assignmentTypeId String
+  assignmentType   AssignmentType @relation(fields: [assignmentTypeId], references: [id], onDelete: Cascade)
+  date             String        // "YYYY-MM-DD"
+  status           PublishStatus @default(DRAFT)
+  isLocked         Boolean       @default(false)
+  note             String?
+  customStartTime  String?
+  customEndTime    String?
+  publishedPairId  String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([date, status])
+  @@index([personId, date])
+  @@index([publishedPairId])
+}
+
+model Unavailability {
+  id              String        @id @default(cuid())
+  personId        String
+  person          Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
+  date            String        // "YYYY-MM-DD"
+  timeBlock       TimeBlock     @default(FULL_DAY)
+  startTime       String?
+  endTime         String?
+  note            String?
+  status          PublishStatus @default(DRAFT)
+  publishedPairId String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([date, status])
+  @@index([personId, date])
+  @@index([publishedPairId])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// --- Milestone 2 Schema Hooks (included in initial migration) ---
+
+model ConstraintRule {
+  id               String          @id @default(cuid())
+  name             String
+  ruleType         String          // "QUALIFICATION" | "PTO_CONFLICT" | "DAY_OF_WEEK" | "TIME_OVERLAP" | "MUTUAL_EXCLUSION_AND_REST" | "WORKLOAD_CAP"
+  enforcement      String          @default("SOFT_WARN") // "HARD_BLOCK" | "SOFT_WARN"
+  assignmentTypeId String?
+  assignmentType   AssignmentType? @relation(fields: [assignmentTypeId], references: [id], onDelete: SetNull)
+  personId         String?
+  person           Person?         @relation(fields: [personId], references: [id], onDelete: SetNull)
+  config           Json            @default("{}")
+  isActive         Boolean         @default(true)
+  priority         Int             @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model ScheduleTemplate {
+  id          String          @id @default(cuid())
+  name        String
+  description String?
+  cycleWeeks  Int             @default(1)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  entries     TemplateEntry[]
+}
+
+model TemplateEntry {
+  id               String           @id @default(cuid())
+  templateId       String
+  template         ScheduleTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  weekIndex        Int              @default(0)
+  dayOfWeek        Int              // 0..6
+  personId         String?
+  person           Person?          @relation(fields: [personId], references: [id], onDelete: SetNull)
+  assignmentTypeId String
+  assignmentType   AssignmentType   @relation(fields: [assignmentTypeId], references: [id], onDelete: Cascade)
+  note             String?
+  customStartTime  String?
+  customEndTime    String?
+}
