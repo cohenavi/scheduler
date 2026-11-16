@@ -5,6 +5,7 @@ import {
   Database,
   Download,
   KeyRound,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -619,6 +620,10 @@ export const CategoriesAssignmentsModal: React.FC<{
   onRefresh: () => Promise<void>;
 }> = ({ categories, assignmentTypes, onClose, onRefresh }) => {
   const [newCatName, setNewCatName] = useState('');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState('');
+
+  const [editingAtId, setEditingAtId] = useState<string | null>(null);
   const [atName, setAtName] = useState('');
   const [atCode, setAtCode] = useState('');
   const [atCatId, setAtCatId] = useState(categories[0]?.id ?? '');
@@ -633,19 +638,67 @@ export const CategoriesAssignmentsModal: React.FC<{
 
   const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
+  const resetAtForm = () => {
+    setEditingAtId(null);
+    setAtName('');
+    setAtCode('');
+    setAtCatId(categories[0]?.id ?? '');
+    setAtColor('#2563EB');
+    setAtBlock('Full Day');
+    setAtStart('08:00');
+    setAtEnd('17:00');
+    setAtTarget(1);
+    setAtKey('');
+    setAtDays([1, 2, 3, 4, 5]);
+    setError('');
+  };
+
+  const startEditAt = (at: AssignmentType) => {
+    setError('');
+    setEditingAtId(at.id);
+    setAtCatId(at.categoryId);
+    setAtName(at.name);
+    setAtCode(at.shortCode);
+    setAtColor(at.colorHex);
+    setAtBlock(at.timeBlockLabel);
+    setAtStart(at.startTime);
+    setAtEnd(at.endTime);
+    setAtTarget(at.requiredStaffPerDay ?? 1);
+    setAtKey(at.shortcutKey ?? '');
+    setAtDays([...at.allowedDaysOfWeek].sort());
+  };
+
   const createCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCatName.trim()) return;
-    await api.createCategory(newCatName.trim());
-    setNewCatName('');
-    await onRefresh();
+    setError('');
+    try {
+      await api.createCategory(newCatName.trim());
+      setNewCatName('');
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create category');
+    }
   };
 
-  const createAssignment = async (e: React.FormEvent) => {
+  const saveCategoryEdit = async (id: string) => {
+    if (!editingCatName.trim()) return;
+    setError('');
+    try {
+      await api.updateCategory(id, { name: editingCatName.trim() });
+      setEditingCatId(null);
+      setEditingCatName('');
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update category');
+    }
+  };
+
+  const submitAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     try {
-      await api.createAssignmentType({
+      const payload = {
         categoryId: atCatId || categories[0]?.id,
         name: atName,
         shortCode: atCode,
@@ -656,13 +709,22 @@ export const CategoriesAssignmentsModal: React.FC<{
         requiredStaffPerDay: atTarget,
         shortcutKey: atKey || null,
         allowedDaysOfWeek: atDays,
-      });
-      setAtName('');
-      setAtCode('');
-      setAtKey('');
+      };
+      if (editingAtId) {
+        await api.updateAssignmentType(editingAtId, payload);
+      } else {
+        await api.createAssignmentType(payload);
+      }
+      resetAtForm();
       await onRefresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create assignment type');
+      setError(
+        err instanceof Error
+          ? err.message
+          : editingAtId
+            ? 'Failed to update assignment type'
+            : 'Failed to create assignment type'
+      );
     }
   };
 
@@ -689,35 +751,101 @@ export const CategoriesAssignmentsModal: React.FC<{
             </button>
           </form>
           <div className="flex flex-wrap gap-1.5">
-            {categories.map((c) => (
-              <div
-                key={c.id}
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800"
-              >
-                <span>{c.name}</span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (confirm(`Delete category "${c.name}" and its assignment types?`)) {
-                      await api.deleteCategory(c.id);
-                      await onRefresh();
-                    }
-                  }}
-                  className="text-slate-400 hover:text-red-600"
+            {categories.map((c) => {
+              const isEditing = editingCatId === c.id;
+              if (isEditing) {
+                return (
+                  <div
+                    key={c.id}
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs"
+                  >
+                    <input
+                      autoFocus
+                      value={editingCatName}
+                      onChange={(e) => setEditingCatName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          saveCategoryEdit(c.id);
+                        } else if (e.key === 'Escape') {
+                          setEditingCatId(null);
+                        }
+                      }}
+                      className="h-5 w-32 rounded border border-blue-200 bg-white px-1.5 text-xs text-slate-900 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => saveCategoryEdit(c.id)}
+                      title="Save category"
+                      className="rounded p-0.5 text-emerald-700 hover:bg-emerald-100"
+                    >
+                      <Check className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingCatId(null)}
+                      title="Cancel"
+                      className="rounded p-0.5 text-slate-500 hover:bg-slate-200"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={c.id}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+                  <span>{c.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingCatId(c.id);
+                      setEditingCatName(c.name);
+                    }}
+                    title="Rename category"
+                    className="text-slate-400 hover:text-blue-600"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (confirm(`Delete category "${c.name}" and its assignment types?`)) {
+                        await api.deleteCategory(c.id);
+                        await onRefresh();
+                      }
+                    }}
+                    title="Delete category"
+                    className="text-slate-400 hover:text-red-600"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* Assignment Types */}
         <div className="border-t border-slate-200 pt-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-            Assignment Types
-          </h3>
-          <form onSubmit={createAssignment} className="mb-3 space-y-2.5 rounded-lg bg-slate-50 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Assignment Types
+            </h3>
+            {editingAtId && (
+              <span className="rounded bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                Editing: {atCode || atName}
+              </span>
+            )}
+          </div>
+          <form
+            onSubmit={submitAssignment}
+            className={`mb-3 space-y-2.5 rounded-lg p-3 ${
+              editingAtId ? 'border border-blue-200 bg-blue-50/40' : 'bg-slate-50'
+            }`}
+          >
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <select
                 value={atCatId}
@@ -820,20 +948,45 @@ export const CategoriesAssignmentsModal: React.FC<{
                   );
                 })}
               </div>
-              <button
-                type="submit"
-                className="inline-flex h-7 items-center gap-1 rounded bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Add Assignment</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                {editingAtId && (
+                  <button
+                    type="button"
+                    onClick={resetAtForm}
+                    className="h-7 rounded border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="inline-flex h-7 items-center gap-1 rounded bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"
+                >
+                  {editingAtId ? (
+                    <>
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Save Changes</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Add Assignment</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
             {error && <p className="text-xs text-red-600">{error}</p>}
           </form>
 
           <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
             {assignmentTypes.map((at) => (
-              <div key={at.id} className="flex items-center justify-between px-3 py-2 text-xs">
+              <div
+                key={at.id}
+                className={`flex items-center justify-between px-3 py-2 text-xs ${
+                  editingAtId === at.id ? 'bg-blue-50/60' : ''
+                }`}
+              >
                 <div className="flex items-center gap-2">
                   <span
                     style={{
@@ -854,22 +1007,35 @@ export const CategoriesAssignmentsModal: React.FC<{
                       )}
                     </div>
                     <div className="text-[11px] text-slate-500">
-                      {at.timeBlockLabel} ({at.startTime}–{at.endTime}) • Target: {at.requiredStaffPerDay ?? 1}/day
+                      {at.timeBlockLabel} ({at.startTime}–{at.endTime}) • Target:{' '}
+                      {at.requiredStaffPerDay ?? 1}/day
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (confirm(`Delete assignment "${at.name}"?`)) {
-                      await api.deleteAssignmentType(at.id);
-                      await onRefresh();
-                    }
-                  }}
-                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEditAt(at)}
+                    title="Edit assignment type"
+                    className="rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (confirm(`Delete assignment "${at.name}"?`)) {
+                        if (editingAtId === at.id) resetAtForm();
+                        await api.deleteAssignmentType(at.id);
+                        await onRefresh();
+                      }
+                    }}
+                    title="Delete assignment type"
+                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
