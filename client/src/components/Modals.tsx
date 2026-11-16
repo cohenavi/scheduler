@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Calendar,
   Check,
@@ -7,6 +7,7 @@ import {
   KeyRound,
   Plus,
   RefreshCw,
+  RotateCcw,
   Slash,
   Sparkles,
   Trash2,
@@ -14,6 +15,13 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../api';
+import {
+  eventToCombo,
+  formatCombo,
+  SHORTCUT_DEFINITIONS,
+  type ShortcutActionId,
+  type ShortcutMap,
+} from '../shortcuts';
 import type { AssignmentType, Category, Person, TimeBlock, Unavailability } from '../types';
 import { getContrastTextColor } from '../utils';
 
@@ -115,55 +123,236 @@ export const LoginModal: React.FC<{
   );
 };
 
-// 2. Keyboard Shortcuts Legend Modal
+// 2. Keyboard Shortcuts Legend & Customization Modal
 export const ShortcutsModal: React.FC<{
   onClose: () => void;
   assignmentTypes: AssignmentType[];
-}> = ({ onClose, assignmentTypes }) => {
-  const shortcuts = [
-    ['Click / Drag', 'Select single cell or marquee range'],
+  shortcuts: ShortcutMap;
+  onChangeShortcuts: (next: ShortcutMap) => void;
+  onResetShortcuts: () => void;
+  isAdmin: boolean;
+  onRefresh: () => Promise<void>;
+}> = ({
+  onClose,
+  assignmentTypes,
+  shortcuts,
+  onChangeShortcuts,
+  onResetShortcuts,
+  isAdmin,
+  onRefresh,
+}) => {
+  const [capturingAction, setCapturingAction] = useState<ShortcutActionId | null>(null);
+  const [capturingAssignmentId, setCapturingAssignmentId] = useState<string | null>(null);
+  const [conflictMsg, setConflictMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!capturingAction && !capturingAssignmentId) return;
+
+    const handleCapture = async (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        setCapturingAction(null);
+        setCapturingAssignmentId(null);
+        setConflictMsg(null);
+        return;
+      }
+
+      if (capturingAction) {
+        const combo = eventToCombo(e);
+        if (!combo) return; // modifier-only press
+
+        const existingEntry = SHORTCUT_DEFINITIONS.find(
+          (def) => def.id !== capturingAction && shortcuts[def.id]?.toLowerCase() === combo.toLowerCase()
+        );
+        if (existingEntry) {
+          setConflictMsg(
+            `"${formatCombo(combo)}" is already used for "${existingEntry.description}".`
+          );
+          return;
+        }
+        setConflictMsg(null);
+        onChangeShortcuts({ ...shortcuts, [capturingAction]: combo });
+        setCapturingAction(null);
+        return;
+      }
+
+      if (capturingAssignmentId) {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const rawKey = e.key === 'Backspace' || e.key === 'Delete' ? '' : e.key.slice(0, 1);
+        if (rawKey && rawKey.trim() === '') return;
+
+        if (rawKey) {
+          const dup = assignmentTypes.find(
+            (at) => at.id !== capturingAssignmentId && at.shortcutKey?.toLowerCase() === rawKey.toLowerCase()
+          );
+          if (dup) {
+            setConflictMsg(`Key "${rawKey}" is already assigned to ${dup.shortCode}.`);
+            return;
+          }
+        }
+        try {
+          setConflictMsg(null);
+          await api.updateAssignmentType(capturingAssignmentId, {
+            shortcutKey: rawKey || null,
+          });
+          setCapturingAssignmentId(null);
+          await onRefresh();
+        } catch (err) {
+          setConflictMsg(err instanceof Error ? err.message : 'Failed to update assignment hotkey');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleCapture, true);
+    return () => window.removeEventListener('keydown', handleCapture, true);
+  }, [
+    capturingAction,
+    capturingAssignmentId,
+    shortcuts,
+    assignmentTypes,
+    onChangeShortcuts,
+    onRefresh,
+  ]);
+
+  const staticGestures = [
+    ['Click Day Box', 'Open cell editor to assign, lock, note, or mark PTO'],
+    ['Click & Drag', 'Marquee-select a range of cells'],
     ['Shift + Click / Arrows', 'Extend rectangular selection'],
-    ['Ctrl/Cmd + A', 'Select all visible cells'],
-    ['1 – 5 (or custom key)', 'Batch-assign to unlocked, non-PTO cells'],
-    ['N or Double-Click', 'Add or edit shift note (max 160 chars)'],
-    ['L', 'Lock / unlock shifts in selection'],
-    ['U', 'Toggle Full-Day PTO / Unavailability'],
-    ['Ctrl/Cmd + C / X / V', 'Copy / Cut / Paste 2D shift pattern'],
-    ['Delete / Backspace', 'Delete unlocked shifts in selection'],
-    ['Ctrl/Cmd + Z', 'Undo last single or batch grid change'],
     ['Escape', 'Close popover or clear selection'],
-    ['?', 'Show this shortcuts legend'],
   ];
 
   return (
-    <ModalShell title="Keyboard Shortcuts" onClose={onClose} maxWidth="max-w-md">
+    <ModalShell title="Keyboard Shortcuts & Customization" onClose={onClose} maxWidth="max-w-lg">
       <div className="space-y-4">
-        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {shortcuts.map(([key, desc]) => (
-            <div key={key} className="flex items-center justify-between px-3 py-2 text-xs">
-              <span className="text-slate-600">{desc}</span>
-              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-800">
-                {key}
-              </kbd>
-            </div>
-          ))}
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+          <span>
+            Click any shortcut badge below and press a new key to customize it. Press{' '}
+            <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-[10px] font-semibold text-slate-700">
+              {formatCombo(shortcuts.help)}
+            </kbd>{' '}
+            or{' '}
+            <kbd className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-[10px] font-semibold text-slate-700">
+              ?
+            </kbd>{' '}
+            anytime to open this popup.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setConflictMsg(null);
+              setCapturingAction(null);
+              setCapturingAssignmentId(null);
+              onResetShortcuts();
+            }}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <RotateCcw className="h-3 w-3" />
+            <span>Reset Defaults</span>
+          </button>
         </div>
 
-        {assignmentTypes.some((a) => a.shortcutKey) && (
-          <div>
-            <h4 className="mb-1.5 text-xs font-semibold text-slate-700">Assignment Hotkeys</h4>
-            <div className="flex flex-wrap gap-1.5">
-              {assignmentTypes
-                .filter((a) => a.shortcutKey)
-                .map((a) => (
-                  <span
-                    key={a.id}
-                    style={{ backgroundColor: a.colorHex, color: getContrastTextColor(a.colorHex) }}
-                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold"
-                  >
-                    <kbd className="font-mono">[{a.shortcutKey}]</kbd> {a.shortCode} — {a.name}
+        {conflictMsg && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+            {conflictMsg}
+          </div>
+        )}
+
+        <div>
+          <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Customizable Shortcuts
+          </h4>
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {SHORTCUT_DEFINITIONS.map((def) => {
+              const isCapturing = capturingAction === def.id;
+              return (
+                <div key={def.id} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                  <span className="text-slate-700">
+                    {def.description}
+                    {def.adminOnly && (
+                      <span className="ml-1.5 text-[10px] text-slate-400">(Admin Draft)</span>
+                    )}
                   </span>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConflictMsg(null);
+                      setCapturingAssignmentId(null);
+                      setCapturingAction(isCapturing ? null : def.id);
+                    }}
+                    title="Click to customize this shortcut"
+                    className={`shrink-0 rounded border px-2 py-0.5 font-mono text-[11px] font-semibold transition-colors ${
+                      isCapturing
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200'
+                        : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-blue-300 hover:bg-blue-50/50'
+                    }`}
+                  >
+                    {isCapturing ? 'Press key...' : formatCombo(shortcuts[def.id])}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Mouse &amp; Navigation
+          </h4>
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {staticGestures.map(([key, desc]) => (
+              <div key={key} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+                <span className="text-slate-600">{desc}</span>
+                <kbd className="shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-800">
+                  {key}
+                </kbd>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {assignmentTypes.length > 0 && (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Assignment Quick-Assign Hotkeys
+              </h4>
+              {isAdmin && (
+                <span className="text-[10px] text-slate-400">
+                  Click a pill to bind key (Del to clear)
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {assignmentTypes.map((a) => {
+                const isCapturing = capturingAssignmentId === a.id;
+                const fg = getContrastTextColor(a.colorHex);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    disabled={!isAdmin}
+                    onClick={() => {
+                      if (!isAdmin) return;
+                      setConflictMsg(null);
+                      setCapturingAction(null);
+                      setCapturingAssignmentId(isCapturing ? null : a.id);
+                    }}
+                    style={{ backgroundColor: a.colorHex, color: fg }}
+                    className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold transition-all ${
+                      isAdmin ? 'cursor-pointer hover:opacity-90' : 'cursor-default opacity-90'
+                    } ${isCapturing ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                  >
+                    <kbd className="rounded bg-black/15 px-1 font-mono text-[10px]">
+                      {isCapturing ? 'Key...' : a.shortcutKey ? `[${a.shortcutKey}]` : '[None]'}
+                    </kbd>
+                    <span>
+                      {a.shortCode} — {a.name}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

@@ -19,12 +19,21 @@ import {
 import { MyAgendaView } from './components/MyAgendaView';
 import { ScheduleGrid } from './components/ScheduleGrid';
 import { TopBar } from './components/TopBar';
+import {
+  loadShortcuts,
+  matchesCombo,
+  resetShortcuts,
+  saveShortcuts,
+  type ShortcutMap,
+} from './shortcuts';
 import type {
   CellCoord,
+  GridDisplayMode,
   Person,
   PublishStatus,
   RangeMode,
   ScheduleData,
+  Shift,
   SortMode,
   UndoEntry,
   ViewMode,
@@ -93,6 +102,10 @@ export function App() {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('order');
 
+  // Grid Display & Customizable Shortcuts
+  const [gridDisplayMode, setGridDisplayMode] = useState<GridDisplayMode>('person');
+  const [shortcuts, setShortcuts] = useState<ShortcutMap>(() => loadShortcuts());
+
   // Grid Selection & Undo
   const [anchor, setAnchor] = useState<CellCoord | null>(null);
   const [focus, setFocus] = useState<CellCoord | null>(null);
@@ -110,6 +123,41 @@ export function App() {
   const [showStats, setShowStats] = useState(false);
   const [showSyncCalendar, setShowSyncCalendar] = useState(false);
   const [activePersonDrawer, setActivePersonDrawer] = useState<Person | null>(null);
+
+  // Global H / ? Help Shortcut
+  useEffect(() => {
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (showShortcuts) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setShowShortcuts(false);
+        }
+        return;
+      }
+
+      if (document.querySelector('[data-modal-open="true"]')) {
+        return;
+      }
+
+      if (matchesCombo(e, shortcuts.help) || e.key === '?') {
+        e.preventDefault();
+        setShowShortcuts(true);
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, [shortcuts.help, showShortcuts]);
 
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: 'info' | 'error' } | null>(null);
@@ -198,6 +246,14 @@ export function App() {
       return 0;
     });
   }, [data.people, searchQuery, sortMode, visibleShifts, assignmentMap]);
+
+  const visibleAssignmentTypes = useMemo(() => {
+    return data.assignmentTypes.filter((at) => {
+      if (selectedCategoryId && at.categoryId !== selectedCategoryId) return false;
+      if (selectedAssignmentId && at.id !== selectedAssignmentId) return false;
+      return true;
+    });
+  }, [data.assignmentTypes, selectedCategoryId, selectedAssignmentId]);
 
   // Actions
   const handlePublish = async () => {
@@ -356,6 +412,49 @@ export function App() {
     [fetchSchedule, showToast]
   );
 
+  const handleDeleteShift = useCallback(
+    async (shiftId: string) => {
+      if (!canEdit) return;
+      try {
+        const res = await api.deleteShift(shiftId);
+        const s = res.deleted;
+        pushUndo({
+          description: 'Remove shift',
+          deleteIds: [],
+          restoreShifts: [
+            {
+              personId: s.personId,
+              assignmentTypeId: s.assignmentTypeId,
+              date: s.date,
+              isLocked: s.isLocked,
+              note: s.note,
+              customStartTime: s.customStartTime,
+              customEndTime: s.customEndTime,
+              publishedPairId: s.publishedPairId ?? null,
+            },
+          ],
+        });
+        await fetchSchedule();
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Delete shift failed', 'error');
+      }
+    },
+    [canEdit, pushUndo, fetchSchedule, showToast]
+  );
+
+  const handleToggleShiftLock = useCallback(
+    async (shift: Shift) => {
+      if (!canEdit) return;
+      try {
+        await api.updateShift(shift.id, { isLocked: !shift.isLocked });
+        await fetchSchedule();
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Lock toggle failed', 'error');
+      }
+    },
+    [canEdit, fetchSchedule, showToast]
+  );
+
   const handleMoveShift = useCallback(
     async (shiftId: string, targetPersonId: string, targetDate: string) => {
       if (!canEdit) return;
@@ -478,6 +577,12 @@ export function App() {
         onChangeRangeMode={setRangeMode}
         viewMode={viewMode}
         onChangeViewMode={setViewMode}
+        gridDisplayMode={gridDisplayMode}
+        onChangeGridDisplayMode={(m) => {
+          setGridDisplayMode(m);
+          setAnchor(null);
+          setFocus(null);
+        }}
         dateRangeLabel={dateRangeLabel}
         onPrev={() => setStartDate((d) => addDays(d, -dayCount))}
         onToday={() => setStartDate(getMondayOfWeek(new Date()))}
@@ -538,12 +643,15 @@ export function App() {
         <ScheduleGrid
           days={days}
           people={visiblePeople}
-          assignmentTypes={data.assignmentTypes}
+          categories={data.categories}
+          assignmentTypes={gridDisplayMode === 'assignment' ? visibleAssignmentTypes : data.assignmentTypes}
           shifts={visibleShifts}
           unavailabilities={data.unavailabilities}
           violations={data.violations}
           isAdmin={isAdmin}
           canEdit={canEdit}
+          gridDisplayMode={gridDisplayMode}
+          shortcuts={shortcuts}
           selectedCells={[]}
           anchor={anchor}
           focus={focus}
@@ -556,6 +664,8 @@ export function App() {
           onBatchLock={handleBatchLock}
           onTogglePto={handleTogglePto}
           onUpdateShiftNote={handleUpdateShiftNote}
+          onDeleteShift={handleDeleteShift}
+          onToggleShiftLock={handleToggleShiftLock}
           onMoveShift={handleMoveShift}
           onPaste={handlePaste}
           onUndo={handleUndo}
@@ -593,6 +703,16 @@ export function App() {
         <ShortcutsModal
           onClose={() => setShowShortcuts(false)}
           assignmentTypes={data.assignmentTypes}
+          shortcuts={shortcuts}
+          onChangeShortcuts={(next) => {
+            setShortcuts(next);
+            saveShortcuts(next);
+          }}
+          onResetShortcuts={() => {
+            setShortcuts(resetShortcuts());
+          }}
+          isAdmin={isAdmin}
+          onRefresh={fetchSchedule}
         />
       )}
 

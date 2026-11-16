@@ -2,6 +2,7 @@ export type PublishStatus = 'DRAFT' | 'PUBLISHED';
 export type TimeBlock = 'FULL_DAY' | 'AM' | 'PM' | 'CUSTOM';
 export type RangeMode = 'week' | 'biweek' | 'month';
 export type ViewMode = 'grid' | 'agenda';
+export type GridDisplayMode = 'person' | 'assignment';
 export type SortMode = 'order' | 'name' | 'role' | 'shifts' | 'hours';
 
 export interface Person {

@@ -5,24 +5,30 @@ import {
   ChevronUp,
   Lock,
   MessageSquare,
+  Plus,
   Slash,
   Trash2,
   Unlock,
   X,
 } from 'lucide-react';
+import { matchesCombo, type ShortcutMap } from '../shortcuts';
 import type {
   AssignmentType,
+  Category,
   CellCoord,
   ClipboardItem,
   ClipboardState,
   ConstraintViolation,
+  GridDisplayMode,
   Person,
   Shift,
   Unavailability,
 } from '../types';
 import {
+  buildInitialsMap,
   compareShiftsByTime,
   formatDayHeader,
+  formatLongDate,
   getContrastTextColor,
   getShiftHours,
 } from '../utils';
@@ -30,12 +36,15 @@ import {
 interface ScheduleGridProps {
   days: string[];
   people: Person[];
+  categories: Category[];
   assignmentTypes: AssignmentType[];
   shifts: Shift[];
   unavailabilities: Unavailability[];
   violations?: ConstraintViolation[];
   isAdmin: boolean;
   canEdit: boolean; // true only when isAdmin && adminViewMode === 'DRAFT'
+  gridDisplayMode: GridDisplayMode;
+  shortcuts: ShortcutMap;
   selectedCells: CellCoord[];
   anchor: CellCoord | null;
   focus: CellCoord | null;
@@ -45,6 +54,8 @@ interface ScheduleGridProps {
   onBatchLock: (isLocked: boolean, cells: Array<{ personId: string; date: string }>) => void;
   onTogglePto: (cells: Array<{ personId: string; date: string }>) => void;
   onUpdateShiftNote: (shiftId: string, note: string | null) => Promise<void>;
+  onDeleteShift: (shiftId: string) => Promise<void>;
+  onToggleShiftLock: (shift: Shift) => Promise<void>;
   onMoveShift: (shiftId: string, targetPersonId: string, targetDate: string) => void;
   onPaste: (
     items: Array<{
@@ -65,12 +76,15 @@ interface ScheduleGridProps {
 export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   days,
   people,
+  categories,
   assignmentTypes,
   shifts,
   unavailabilities,
   violations = [],
   isAdmin,
   canEdit,
+  gridDisplayMode,
+  shortcuts,
   anchor,
   focus,
   onChangeSelection,
@@ -79,6 +93,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   onBatchLock,
   onTogglePto,
   onUpdateShiftNote,
+  onDeleteShift,
+  onToggleShiftLock,
   onMoveShift,
   onPaste,
   onUndo,
@@ -86,6 +102,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   onOpenShortcuts,
 }) => {
   const [isDraggingMarquee, setIsDraggingMarquee] = useState(false);
+  const dragStartCellRef = useRef<CellCoord | null>(null);
+  const didMarqueeMoveRef = useRef(false);
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
   const [conflictsOpen, setConflictsOpen] = useState(false);
   const [noteEditor, setNoteEditor] = useState<{
@@ -94,6 +112,11 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     x: number;
     y: number;
   } | null>(null);
+  const [cellEditor, setCellEditor] = useState<
+    | { mode: 'person'; personId: string; date: string; x: number; y: number }
+    | { mode: 'assignment'; assignmentTypeId: string; date: string; x: number; y: number }
+    | null
+  >(null);
   const [savingNote, setSavingNote] = useState(false);
   const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -112,6 +135,10 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     [assignmentTypes]
   );
 
+  const personMap = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+  const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const initialsMap = useMemo(() => buildInitialsMap(people), [people]);
+
   // Index shifts and unavailabilities by "personId::date"
   const shiftsByCell = useMemo(() => {
     const map = new Map<string, Shift[]>();
@@ -127,6 +154,26 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     }
     return map;
   }, [shifts, assignmentMap]);
+
+  // Index shifts by "assignmentTypeId::date" for Assignment-focused display mode
+  const shiftsByAssignmentCell = useMemo(() => {
+    const map = new Map<string, Shift[]>();
+    for (const s of shifts) {
+      const key = `${s.assignmentTypeId}::${s.date}`;
+      const list = map.get(key) ?? [];
+      list.push(s);
+      map.set(key, list);
+    }
+    for (const [k, list] of map.entries()) {
+      list.sort((a, b) => {
+        const pA = personMap.get(a.personId)?.name ?? '';
+        const pB = personMap.get(b.personId)?.name ?? '';
+        return pA.localeCompare(pB);
+      });
+      map.set(k, list);
+    }
+    return map;
+  }, [shifts, personMap]);
 
   const unavailByCell = useMemo(() => {
     const map = new Map<string, Unavailability>();
@@ -220,6 +267,39 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     });
   }, []);
 
+  const openCellEditorForPerson = useCallback((personId: string, date: string, rect?: DOMRect) => {
+    const popW = 320;
+    const popH = 380;
+    const x = rect ? Math.min(rect.left, window.innerWidth - popW - 12) : window.innerWidth / 2 - popW / 2;
+    const y = rect
+      ? rect.bottom + popH > window.innerHeight
+        ? Math.max(12, rect.top - popH - 6)
+        : rect.bottom + 6
+      : window.innerHeight / 2 - popH / 2;
+    setCellEditor({ mode: 'person', personId, date, x: Math.max(12, x), y: Math.max(12, y) });
+  }, []);
+
+  const openCellEditorForAssignment = useCallback(
+    (assignmentTypeId: string, date: string, rect?: DOMRect) => {
+      const popW = 320;
+      const popH = 380;
+      const x = rect ? Math.min(rect.left, window.innerWidth - popW - 12) : window.innerWidth / 2 - popW / 2;
+      const y = rect
+        ? rect.bottom + popH > window.innerHeight
+          ? Math.max(12, rect.top - popH - 6)
+          : rect.bottom + 6
+        : window.innerHeight / 2 - popH / 2;
+      setCellEditor({
+        mode: 'assignment',
+        assignmentTypeId,
+        date,
+        x: Math.max(12, x),
+        y: Math.max(12, y),
+      });
+    },
+    []
+  );
+
   // Keyboard shortcuts handler
   useEffect(() => {
     if (!canEdit) return;
@@ -245,16 +325,12 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      if (e.key === '?') {
-        e.preventDefault();
-        onOpenShortcuts();
-        return;
-      }
-
       if (e.key === 'Escape') {
         e.preventDefault();
         if (noteEditor) {
           setNoteEditor(null);
+        } else if (cellEditor) {
+          setCellEditor(null);
         } else if (clipboard) {
           setClipboard(null);
         } else {
@@ -263,23 +339,23 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      const isMod = e.ctrlKey || e.metaKey;
-
-      // Ctrl/Cmd + Z -> Undo
-      if (isMod && e.key.toLowerCase() === 'z') {
+      // Undo
+      if (matchesCombo(e, shortcuts.undo)) {
         e.preventDefault();
         onUndo();
         return;
       }
 
-      // Ctrl/Cmd + A -> Select all visible cells
-      if (isMod && e.key.toLowerCase() === 'a') {
+      // Select all visible cells
+      if (matchesCombo(e, shortcuts.selectAll)) {
         e.preventDefault();
-        if (people.length > 0 && days.length > 0) {
+        if (gridDisplayMode === 'person' && people.length > 0 && days.length > 0) {
           onChangeSelection({ row: 0, col: 0 }, { row: people.length - 1, col: days.length - 1 });
         }
         return;
       }
+
+      const isMod = e.ctrlKey || e.metaKey;
 
       // Arrow navigation
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -301,13 +377,13 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      // Operations requiring a selection
-      if (!selectionBounds) return;
+      // Operations requiring a selection (Person-focused grid)
+      if (gridDisplayMode !== 'person' || !selectionBounds) return;
       const cells = getSelectedCellRefs();
       if (cells.length === 0) return;
 
-      // Ctrl/Cmd + C -> Copy
-      if (isMod && e.key.toLowerCase() === 'c') {
+      // Copy
+      if (matchesCombo(e, shortcuts.copy)) {
         e.preventDefault();
         const items: ClipboardItem[] = [];
         const sourceKeys = new Set<string>();
@@ -335,8 +411,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      // Ctrl/Cmd + X -> Cut
-      if (isMod && e.key.toLowerCase() === 'x') {
+      // Cut
+      if (matchesCombo(e, shortcuts.cut)) {
         e.preventDefault();
         const items: ClipboardItem[] = [];
         const sourceKeys = new Set<string>();
@@ -365,8 +441,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      // Ctrl/Cmd + V -> Paste
-      if (isMod && e.key.toLowerCase() === 'v') {
+      // Paste
+      if (matchesCombo(e, shortcuts.paste)) {
         e.preventDefault();
         if (!clipboard || !focus) return;
         const startRow = selectionBounds.minRow;
@@ -417,17 +493,33 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      if (isMod) return;
-
       // Delete / Backspace -> Batch delete unlocked shifts
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (
+        matchesCombo(e, shortcuts.delete) ||
+        (shortcuts.delete === 'Delete' && e.key === 'Backspace')
+      ) {
         e.preventDefault();
         onBatchDelete(cells);
         return;
       }
 
-      // L -> Toggle Lock on selected shifts
-      if (e.key.toLowerCase() === 'l') {
+      // Edit focused cell
+      if (matchesCombo(e, shortcuts.editCell) || e.key === 'Enter') {
+        e.preventDefault();
+        const f = focus ?? anchor;
+        if (!f) return;
+        const p = people[f.row];
+        const d = days[f.col];
+        if (!p || !d) return;
+        const cellEl = document.querySelector(
+          `[data-cell-key="${p.id}::${d}"]`
+        ) as HTMLElement | null;
+        openCellEditorForPerson(p.id, d, cellEl?.getBoundingClientRect());
+        return;
+      }
+
+      // Toggle Lock on selected shifts
+      if (matchesCombo(e, shortcuts.lock)) {
         e.preventDefault();
         const selectedShifts: Shift[] = [];
         for (const c of cells) {
@@ -439,15 +531,15 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      // U -> Toggle PTO/Unavailability
-      if (e.key.toLowerCase() === 'u') {
+      // Toggle PTO/Unavailability
+      if (matchesCombo(e, shortcuts.pto)) {
         e.preventDefault();
         onTogglePto(cells);
         return;
       }
 
-      // N -> Open Note Editor on focused shift
-      if (e.key.toLowerCase() === 'n') {
+      // Open Note Editor on focused shift
+      if (matchesCombo(e, shortcuts.note)) {
         e.preventDefault();
         const f = focus ?? anchor;
         if (!f) return;
@@ -464,6 +556,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
+      if (isMod) return;
+
       // Shortcut keys (1-9, etc.) for AssignmentTypes
       const matchedAt = assignmentTypes.find(
         (at) => at.shortcutKey && at.shortcutKey.toLowerCase() === e.key.toLowerCase()
@@ -478,7 +572,10 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     canEdit,
+    gridDisplayMode,
+    shortcuts,
     noteEditor,
+    cellEditor,
     clipboard,
     people,
     days,
@@ -495,8 +592,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     onTogglePto,
     onPaste,
     onUndo,
-    onOpenShortcuts,
     openNoteEditorForShift,
+    openCellEditorForPerson,
   ]);
 
   const handleSaveNote = async () => {
@@ -559,8 +656,16 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
           <tr>
             <th className="sticky left-0 z-30 min-w-[205px] max-w-[230px] border-b border-r border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-700">
               <div className="flex items-center justify-between">
-                <span>Team ({people.length})</span>
-                {isAdmin && <span className="text-[10px] font-medium text-slate-400">Shifts / Hrs</span>}
+                <span>
+                  {gridDisplayMode === 'assignment'
+                    ? `Assignments (${assignmentTypes.length})`
+                    : `Team (${people.length})`}
+                </span>
+                {isAdmin && (
+                  <span className="text-[10px] font-medium text-slate-400">
+                    {gridDisplayMode === 'assignment' ? 'Target/Day' : 'Shifts / Hrs'}
+                  </span>
+                )}
               </div>
             </th>
             {days.map((date) => {
@@ -601,7 +706,147 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         </thead>
 
         <tbody>
-          {people.map((person, rowIdx) => {
+          {gridDisplayMode === 'assignment'
+            ? assignmentTypes.map((at) => {
+                const catName = categoryMap.get(at.categoryId)?.name ?? '';
+                const fg = getContrastTextColor(at.colorHex);
+                return (
+                  <tr key={at.id} className="group hover:bg-slate-50/40">
+                    {/* Sticky Assignment Column */}
+                    <td className="sticky left-0 z-10 border-b border-r border-slate-200 bg-white px-3 py-1.5 group-hover:bg-slate-50/90">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              style={{ backgroundColor: at.colorHex, color: fg }}
+                              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
+                            >
+                              {at.shortCode}
+                            </span>
+                            <span className="truncate font-semibold text-slate-900 max-w-[125px]">
+                              {at.name}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] text-slate-500 max-w-[170px]">
+                            {catName ? `${catName} • ` : ''}
+                            {at.startTime}–{at.endTime}
+                          </div>
+                        </div>
+                        {isAdmin && (
+                          <div className="shrink-0 text-right text-[10px] font-medium text-slate-500 tabular-nums">
+                            <div>{at.requiredStaffPerDay ?? 1}/d</div>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Day Cells (Assignment x Day) */}
+                    {days.map((date) => {
+                      const key = `${at.id}::${date}`;
+                      const cellShifts = shiftsByAssignmentCell.get(key) ?? [];
+                      const { isWeekend, dayOfWeek } = formatDayHeader(date);
+                      const isAllowedDay = at.allowedDaysOfWeek.includes(dayOfWeek);
+                      const req = isAllowedDay ? (at.requiredStaffPerDay ?? 1) : 0;
+                      const isUnderstaffed = isAdmin && req > 0 && cellShifts.length < req;
+
+                      return (
+                        <td
+                          key={key}
+                          data-assignment-cell-key={key}
+                          onClick={(e) => {
+                            if (!canEdit) return;
+                            openCellEditorForAssignment(
+                              at.id,
+                              date,
+                              (e.currentTarget as HTMLElement).getBoundingClientRect()
+                            );
+                          }}
+                          className={`relative h-14 min-w-[116px] select-none border-b border-r border-slate-200 p-1 align-top transition-colors ${
+                            !isAllowedDay
+                              ? 'bg-slate-100/60'
+                              : isWeekend
+                                ? 'bg-slate-50/50'
+                                : 'bg-white'
+                          } ${canEdit ? 'cursor-pointer hover:bg-blue-50/30' : ''}`}
+                        >
+                          <div className="flex flex-col gap-1">
+                            {cellShifts.map((shift) => {
+                              const person = personMap.get(shift.personId);
+                              const initials = initialsMap.get(shift.personId) ?? '?';
+                              const hasNote = Boolean(shift.note && shift.note.trim());
+                              const shiftViolations = isAdmin
+                                ? violationsByShiftId.get(shift.id) ?? []
+                                : [];
+                              const hasConflict = shiftViolations.length > 0;
+
+                              return (
+                                <div
+                                  key={shift.id}
+                                  onDoubleClick={(e) => {
+                                    if (!canEdit) return;
+                                    e.stopPropagation();
+                                    openNoteEditorForShift(
+                                      shift,
+                                      (e.currentTarget as HTMLElement).getBoundingClientRect()
+                                    );
+                                  }}
+                                  title={`${at.name}: ${person?.name ?? 'Unknown'} (${
+                                    person?.role ?? ''
+                                  }) • ${shift.customStartTime || at.startTime}–${
+                                    shift.customEndTime || at.endTime
+                                  }${shift.isLocked ? ' • Locked' : ''}${
+                                    hasNote ? `\nNote: ${shift.note}` : ''
+                                  }${
+                                    hasConflict
+                                      ? `\n⚠ Conflicts:\n${shiftViolations
+                                          .map((v) => `• ${v.ruleName}: ${v.message}`)
+                                          .join('\n')}`
+                                      : ''
+                                  }`}
+                                  style={{ backgroundColor: at.colorHex, color: fg }}
+                                  className={`relative flex items-center justify-between gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold shadow-2xs ${
+                                    hasConflict ? 'ring-2 ring-red-500 ring-offset-1' : ''
+                                  }`}
+                                >
+                                  <span className="truncate">
+                                    {at.shortCode} ({initials})
+                                  </span>
+                                  <div className="flex shrink-0 items-center gap-0.5">
+                                    {hasConflict && (
+                                      <AlertTriangle
+                                        className="no-print h-3 w-3 text-amber-300 drop-shadow-xs"
+                                        aria-label="Conflict"
+                                      />
+                                    )}
+                                    {shift.isLocked && (
+                                      <Lock
+                                        className="no-print h-2.5 w-2.5 opacity-90"
+                                        aria-label="Locked"
+                                      />
+                                    )}
+                                    {hasNote && (
+                                      <span
+                                        className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300 ring-1 ring-black/20"
+                                        aria-label="Has note"
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {isUnderstaffed && (
+                              <div className="text-[10px] font-medium text-amber-700/80">
+                                Need {req - cellShifts.length}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })
+            : people.map((person, rowIdx) => {
             const stats = personStats.get(person.id) ?? { count: 0, hours: 0 };
             return (
               <tr key={person.id} className="group hover:bg-slate-50/40">
@@ -658,6 +903,8 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                       data-cell-key={key}
                       onMouseDown={(e) => {
                         if (!canEdit || e.button !== 0) return;
+                        dragStartCellRef.current = { row: rowIdx, col: colIdx };
+                        didMarqueeMoveRef.current = false;
                         if (e.shiftKey && anchor) {
                           onChangeSelection(anchor, { row: rowIdx, col: colIdx });
                         } else {
@@ -667,7 +914,28 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                       }}
                       onMouseEnter={() => {
                         if (canEdit && isDraggingMarquee && anchor) {
+                          if (
+                            dragStartCellRef.current &&
+                            (dragStartCellRef.current.row !== rowIdx ||
+                              dragStartCellRef.current.col !== colIdx)
+                          ) {
+                            didMarqueeMoveRef.current = true;
+                          }
                           onChangeSelection(anchor, { row: rowIdx, col: colIdx });
+                        }
+                      }}
+                      onMouseUp={(e) => {
+                        if (!canEdit || e.button !== 0 || e.shiftKey) return;
+                        if (
+                          !didMarqueeMoveRef.current &&
+                          dragStartCellRef.current?.row === rowIdx &&
+                          dragStartCellRef.current?.col === colIdx
+                        ) {
+                          openCellEditorForPerson(
+                            person.id,
+                            date,
+                            (e.currentTarget as HTMLElement).getBoundingClientRect()
+                          );
                         }
                       }}
                       onDragOver={(e) => {
@@ -929,6 +1197,341 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 Save Note
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Click-to-Edit Day Cell Popover */}
+      {canEdit && cellEditor && (
+        <div
+          className="no-print fixed inset-0 z-40"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setCellEditor(null);
+          }}
+        >
+          <div
+            style={{ left: cellEditor.x, top: cellEditor.y }}
+            className="fixed z-40 w-80 max-h-[82vh] flex flex-col rounded-xl border border-slate-200 bg-white shadow-2xl"
+          >
+            {cellEditor.mode === 'person' ? (
+              (() => {
+                const person = personMap.get(cellEditor.personId);
+                const cellKey = `${cellEditor.personId}::${cellEditor.date}`;
+                const cellShifts = shiftsByCell.get(cellKey) ?? [];
+                const unavail = unavailByCell.get(cellKey);
+                if (!person) return null;
+
+                return (
+                  <>
+                    <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-semibold text-slate-900">
+                          {person.name}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          {formatLongDate(cellEditor.date)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCellEditor(null)}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 overflow-y-auto p-3 text-xs">
+                      {/* Existing Shifts in Cell */}
+                      {cellShifts.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                            Assigned Shifts
+                          </div>
+                          {cellShifts.map((shift) => {
+                            const at = assignmentMap.get(shift.assignmentTypeId);
+                            if (!at) return null;
+                            const fg = getContrastTextColor(at.colorHex);
+                            return (
+                              <div
+                                key={shift.id}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 p-1.5"
+                              >
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span
+                                    style={{ backgroundColor: at.colorHex, color: fg }}
+                                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold"
+                                  >
+                                    {at.shortCode}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium text-slate-800">
+                                      {at.name}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500">
+                                      {shift.customStartTime || at.startTime}–
+                                      {shift.customEndTime || at.endTime}
+                                      {shift.note ? ` • "${shift.note}"` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => onToggleShiftLock(shift)}
+                                    title={shift.isLocked ? 'Unlock shift' : 'Lock shift'}
+                                    className={`rounded p-1 hover:bg-white ${
+                                      shift.isLocked ? 'text-amber-600' : 'text-slate-400 hover:text-slate-700'
+                                    }`}
+                                  >
+                                    {shift.isLocked ? (
+                                      <Lock className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <Unlock className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) =>
+                                      openNoteEditorForShift(
+                                        shift,
+                                        (e.currentTarget as HTMLElement).getBoundingClientRect()
+                                      )
+                                    }
+                                    title="Edit shift note"
+                                    className={`rounded p-1 hover:bg-white ${
+                                      shift.note ? 'text-blue-600' : 'text-slate-400 hover:text-slate-700'
+                                    }`}
+                                  >
+                                    <MessageSquare className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={shift.isLocked}
+                                    onClick={() => onDeleteShift(shift.id)}
+                                    title={shift.isLocked ? 'Unlock before deleting' : 'Remove shift'}
+                                    className="rounded p-1 text-red-500 hover:bg-white disabled:cursor-not-allowed disabled:opacity-30"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Quick Assign Buttons */}
+                      <div>
+                        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Click to Assign Shift
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {assignmentTypes.map((at) => {
+                            const fg = getContrastTextColor(at.colorHex);
+                            return (
+                              <button
+                                key={at.id}
+                                type="button"
+                                onClick={() =>
+                                  onBatchAssign(at.id, [
+                                    { personId: cellEditor.personId, date: cellEditor.date },
+                                  ])
+                                }
+                                style={{ backgroundColor: at.colorHex, color: fg }}
+                                className="flex items-center justify-between gap-1 rounded-md px-2 py-1.5 text-left text-[11px] font-semibold shadow-2xs transition-transform hover:scale-[1.02]"
+                              >
+                                <span className="flex min-w-0 items-center gap-1">
+                                  <Plus className="h-3 w-3 shrink-0 opacity-80" />
+                                  <span className="truncate">{at.shortCode}</span>
+                                </span>
+                                {at.shortcutKey && (
+                                  <kbd className="rounded bg-black/15 px-1 font-mono text-[9px]">
+                                    {at.shortcutKey}
+                                  </kbd>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* PTO Toggle */}
+                      <div className="border-t border-slate-100 pt-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onTogglePto([{ personId: cellEditor.personId, date: cellEditor.date }])
+                          }
+                          className={`flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium ${
+                            unavail
+                              ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Slash className="h-3.5 w-3.5" />
+                          <span>{unavail ? 'Clear PTO / Unavailable' : 'Mark Full-Day PTO'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()
+            ) : (
+              (() => {
+                const at = assignmentMap.get(cellEditor.assignmentTypeId);
+                const cellKey = `${cellEditor.assignmentTypeId}::${cellEditor.date}`;
+                const cellShifts = shiftsByAssignmentCell.get(cellKey) ?? [];
+                if (!at) return null;
+                const fg = getContrastTextColor(at.colorHex);
+                const assignedPersonIds = new Set(cellShifts.map((s) => s.personId));
+
+                return (
+                  <>
+                    <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            style={{ backgroundColor: at.colorHex, color: fg }}
+                            className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                          >
+                            {at.shortCode}
+                          </span>
+                          <span className="truncate text-xs font-semibold text-slate-900">
+                            {at.name}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">
+                          {formatLongDate(cellEditor.date)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCellEditor(null)}
+                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 overflow-y-auto p-3 text-xs">
+                      {cellShifts.length > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                            Assigned Personnel
+                          </div>
+                          {cellShifts.map((shift) => {
+                            const person = personMap.get(shift.personId);
+                            const initials = initialsMap.get(shift.personId) ?? '?';
+                            return (
+                              <div
+                                key={shift.id}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 p-1.5"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate font-medium text-slate-800">
+                                    {person?.name ?? 'Unknown'}{' '}
+                                    <span className="text-slate-500">({initials})</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">
+                                    {person?.role}
+                                    {shift.note ? ` • "${shift.note}"` : ''}
+                                  </div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => onToggleShiftLock(shift)}
+                                    title={shift.isLocked ? 'Unlock shift' : 'Lock shift'}
+                                    className={`rounded p-1 hover:bg-white ${
+                                      shift.isLocked ? 'text-amber-600' : 'text-slate-400 hover:text-slate-700'
+                                    }`}
+                                  >
+                                    {shift.isLocked ? (
+                                      <Lock className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <Unlock className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) =>
+                                      openNoteEditorForShift(
+                                        shift,
+                                        (e.currentTarget as HTMLElement).getBoundingClientRect()
+                                      )
+                                    }
+                                    title="Edit shift note"
+                                    className={`rounded p-1 hover:bg-white ${
+                                      shift.note ? 'text-blue-600' : 'text-slate-400 hover:text-slate-700'
+                                    }`}
+                                  >
+                                    <MessageSquare className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={shift.isLocked}
+                                    onClick={() => onDeleteShift(shift.id)}
+                                    title={shift.isLocked ? 'Unlock before deleting' : 'Remove shift'}
+                                    className="rounded p-1 text-red-500 hover:bg-white disabled:cursor-not-allowed disabled:opacity-30"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          Click Person to Assign
+                        </div>
+                        <div className="max-h-48 space-y-1 overflow-y-auto pr-0.5">
+                          {people.map((p) => {
+                            const already = assignedPersonIds.has(p.id);
+                            const unavail = unavailByCell.get(`${p.id}::${cellEditor.date}`);
+                            const initials = initialsMap.get(p.id) ?? '?';
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                disabled={already}
+                                onClick={() =>
+                                  onBatchAssign(at.id, [{ personId: p.id, date: cellEditor.date }])
+                                }
+                                className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left transition-colors ${
+                                  already
+                                    ? 'border-slate-100 bg-slate-50 text-slate-400 cursor-default'
+                                    : 'border-slate-200 bg-white text-slate-800 hover:border-blue-300 hover:bg-blue-50/50'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <span className="font-semibold">{p.name}</span>{' '}
+                                  <span className="text-[10px] text-slate-500">({initials})</span>
+                                  <div className="truncate text-[10px] text-slate-400">{p.role}</div>
+                                </div>
+                                {already ? (
+                                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                    Assigned
+                                  </span>
+                                ) : unavail ? (
+                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                                    PTO
+                                  </span>
+                                ) : (
+                                  <Plus className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()
+            )}
           </div>
         </div>
       )}

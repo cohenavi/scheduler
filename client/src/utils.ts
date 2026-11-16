@@ -91,3 +91,43 @@ export function compareShiftsByTime(a: Shift, b: Shift, assignmentMap: Map<strin
   if (startA !== startB) return startA.localeCompare(startB);
   return (atA?.sortOrder ?? 0) - (atB?.sortOrder ?? 0);
 }
+
+const HONORIFICS = new Set(['dr', 'dr.', 'mr', 'mr.', 'mrs', 'mrs.', 'ms', 'ms.', 'prof', 'prof.']);
+
+export function getPersonInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length > 0 && !HONORIFICS.has(p.toLowerCase()));
+  if (parts.length === 0) return name.trim().slice(0, 2).toUpperCase() || '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+export function buildInitialsMap(people: Array<{ id: string; name: string }>): Map<string, string> {
+  const raw = new Map<string, string>();
+  const counts = new Map<string, number>();
+  for (const p of people) {
+    const ini = getPersonInitials(p.name);
+    raw.set(p.id, ini);
+    counts.set(ini, (counts.get(ini) ?? 0) + 1);
+  }
+
+  const result = new Map<string, string>();
+  for (const p of people) {
+    const ini = raw.get(p.id) ?? '?';
+    if ((counts.get(ini) ?? 0) <= 1) {
+      result.set(p.id, ini);
+    } else {
+      const parts = p.name
+        .trim()
+        .split(/\s+/)
+        .filter((part) => part.length > 0 && !HONORIFICS.has(part.toLowerCase()));
+      const last = parts[parts.length - 1] ?? '';
+      const disambig = last.length >= 2 ? `${ini}${last[1].toLowerCase()}` : ini;
+      result.set(p.id, disambig);
+    }
+  }
+  return result;
+}
+

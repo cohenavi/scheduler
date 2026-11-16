@@ -20,7 +20,7 @@ import {
   Tags,
   Users,
 } from 'lucide-react';
-import type { PublishStatus, RangeMode, ViewMode } from '../types';
+import type { GridDisplayMode, PublishStatus, RangeMode, ViewMode } from '../types';
 
 interface TopBarProps {
   isAdmin: boolean;
@@ -34,6 +34,8 @@ interface TopBarProps {
   onChangeRangeMode: (mode: RangeMode) => void;
   viewMode: ViewMode;
   onChangeViewMode: (mode: ViewMode) => void;
+  gridDisplayMode: GridDisplayMode;
+  onChangeGridDisplayMode: (mode: GridDisplayMode) => void;
   dateRangeLabel: string;
   onPrev: () => void;
   onToday: () => void;
@@ -64,6 +66,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onChangeRangeMode,
   viewMode,
   onChangeViewMode,
+  gridDisplayMode,
+  onChangeGridDisplayMode,
   dateRangeLabel,
   onPrev,
   onToday,
@@ -174,6 +178,38 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
           </div>
 
+          {viewMode === 'grid' && (
+            <div
+              className="flex items-center rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs"
+              title="Switch between Person-focused and Assignment-focused grid"
+            >
+              <button
+                type="button"
+                onClick={() => onChangeGridDisplayMode('person')}
+                className={`flex items-center gap-1 rounded px-2 py-1 font-medium transition-colors ${
+                  gridDisplayMode === 'person'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>By Person</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeGridDisplayMode('assignment')}
+                className={`flex items-center gap-1 rounded px-2 py-1 font-medium transition-colors ${
+                  gridDisplayMode === 'assignment'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Tags className="h-3.5 w-3.5" />
+                <span>By Assignment</span>
+              </button>
+            </div>
+          )}
+
           {/* Public Sync Calendar & Print Wall Chart */}
           <button
             type="button"
@@ -252,16 +288,15 @@ export const TopBar: React.FC<TopBarProps> = ({
             </div>
           )}
 
-          {isAdmin && (
-            <button
-              onClick={onOpenShortcuts}
-              className="rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              title="Keyboard Shortcuts (?)"
-              aria-label="Keyboard Shortcuts"
-            >
-              <HelpCircle className="h-4 w-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onOpenShortcuts}
+            className="rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            title="Keyboard Shortcuts (H / ?)"
+            aria-label="Keyboard Shortcuts"
+          >
+            <HelpCircle className="h-4 w-4" />
+          </button>
 
           {isAdmin ? (
             <button
