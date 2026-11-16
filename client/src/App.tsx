@@ -327,10 +327,8 @@ export function App() {
             })),
           });
         }
-        if (res.skippedLocked > 0 || res.skippedPto > 0) {
-          showToast(
-            `Assigned ${res.created.length} (skipped ${res.skippedLocked} locked, ${res.skippedPto} PTO)`
-          );
+        if (res.skippedLocked > 0) {
+          showToast(`Assigned ${res.created.length} (skipped ${res.skippedLocked} locked)`);
         }
         await fetchSchedule();
       } catch (err) {
@@ -381,20 +379,6 @@ export function App() {
         await fetchSchedule();
       } catch (err) {
         showToast(err instanceof Error ? err.message : 'Lock failed', 'error');
-      }
-    },
-    [canEdit, fetchSchedule, showToast]
-  );
-
-  const handleTogglePto = useCallback(
-    async (cells: Array<{ personId: string; date: string }>) => {
-      if (!canEdit || cells.length === 0) return;
-      try {
-        const res = await api.toggleUnavailability({ cells, timeBlock: 'FULL_DAY' });
-        showToast(res.action === 'added' ? 'Marked PTO / Unavailable' : 'Cleared PTO / Unavailable');
-        await fetchSchedule();
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : 'PTO toggle failed', 'error');
       }
     },
     [canEdit, fetchSchedule, showToast]
@@ -634,7 +618,6 @@ export function App() {
             categories={data.categories}
             assignmentTypes={data.assignmentTypes}
             shifts={visibleShifts}
-            unavailabilities={data.unavailabilities}
             isAdmin={isAdmin}
             onOpenSyncCalendar={() => setShowSyncCalendar(true)}
           />
@@ -646,7 +629,6 @@ export function App() {
           categories={data.categories}
           assignmentTypes={gridDisplayMode === 'assignment' ? visibleAssignmentTypes : data.assignmentTypes}
           shifts={visibleShifts}
-          unavailabilities={data.unavailabilities}
           violations={data.violations}
           isAdmin={isAdmin}
           canEdit={canEdit}
@@ -662,7 +644,6 @@ export function App() {
           onBatchAssign={handleBatchAssign}
           onBatchDelete={handleBatchDelete}
           onBatchLock={handleBatchLock}
-          onTogglePto={handleTogglePto}
           onUpdateShiftNote={handleUpdateShiftNote}
           onDeleteShift={handleDeleteShift}
           onToggleShiftLock={handleToggleShiftLock}
@@ -720,7 +701,6 @@ export function App() {
         <PersonDrawer
           person={activePersonDrawer}
           assignmentTypes={data.assignmentTypes}
-          unavailabilities={data.unavailabilities}
           onClose={() => setActivePersonDrawer(null)}
           onRefresh={fetchSchedule}
         />

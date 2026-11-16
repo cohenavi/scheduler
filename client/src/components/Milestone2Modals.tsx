@@ -215,7 +215,6 @@ export const RulesEngineModal: React.FC<{
             >
               <option value="MUTUAL_EXCLUSION_AND_REST">Turnaround Rest / Mutual Exclusion</option>
               <option value="QUALIFICATION">Qualification Confinement</option>
-              <option value="PTO_CONFLICT">PTO / Unavailability Conflict</option>
               <option value="DAY_OF_WEEK">Day-of-Week Validity</option>
               <option value="TIME_OVERLAP">Time-Overlap Prevention</option>
               <option value="WORKLOAD_CAP">Workload &amp; Hour Cap</option>
@@ -935,13 +934,12 @@ export const StatsModal: React.FC<{
         ) : (
           <>
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               {[
                 ['Total Shifts', stats.kpis.totalShifts],
                 ['Total Hours', `${stats.kpis.totalHours}h`],
                 ['Coverage Rate', `${stats.kpis.coverageRate}%`],
                 ['Conflicts', stats.kpis.conflictCount],
-                ['PTO Blocks', `${stats.kpis.ptoCount} (${stats.kpis.ptoHours}h)`],
               ].map(([label, val]) => (
                 <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
                   <div className="text-[11px] font-medium text-slate-500">{label}</div>
@@ -979,7 +977,6 @@ export const StatsModal: React.FC<{
                         {c.name}
                       </th>
                     ))}
-                    <th className="px-3 py-2">PTO</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 tabular-nums">
@@ -1012,7 +1009,6 @@ export const StatsModal: React.FC<{
                           </td>
                         );
                       })}
-                      <td className="px-3 py-1.5 text-slate-500">{p.ptoCount}</td>
                     </tr>
                   ))}
                 </tbody>

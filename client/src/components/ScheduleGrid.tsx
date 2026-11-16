@@ -39,7 +39,6 @@ interface ScheduleGridProps {
   categories: Category[];
   assignmentTypes: AssignmentType[];
   shifts: Shift[];
-  unavailabilities: Unavailability[];
   violations?: ConstraintViolation[];
   isAdmin: boolean;
   canEdit: boolean; // true only when isAdmin && adminViewMode === 'DRAFT'
@@ -52,7 +51,6 @@ interface ScheduleGridProps {
   onBatchAssign: (assignmentTypeId: string, cells: Array<{ personId: string; date: string }>) => void;
   onBatchDelete: (cells: Array<{ personId: string; date: string }>) => void;
   onBatchLock: (isLocked: boolean, cells: Array<{ personId: string; date: string }>) => void;
-  onTogglePto: (cells: Array<{ personId: string; date: string }>) => void;
   onUpdateShiftNote: (shiftId: string, note: string | null) => Promise<void>;
   onDeleteShift: (shiftId: string) => Promise<void>;
   onToggleShiftLock: (shift: Shift) => Promise<void>;
@@ -79,7 +77,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   categories,
   assignmentTypes,
   shifts,
-  unavailabilities,
   violations = [],
   isAdmin,
   canEdit,
@@ -91,7 +88,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   onBatchAssign,
   onBatchDelete,
   onBatchLock,
-  onTogglePto,
   onUpdateShiftNote,
   onDeleteShift,
   onToggleShiftLock,
@@ -99,7 +95,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   onPaste,
   onUndo,
   onOpenPersonDrawer,
-  onOpenShortcuts,
 }) => {
   const [isDraggingMarquee, setIsDraggingMarquee] = useState(false);
   const dragStartCellRef = useRef<CellCoord | null>(null);
@@ -174,14 +169,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     }
     return map;
   }, [shifts, personMap]);
-
-  const unavailByCell = useMemo(() => {
-    const map = new Map<string, Unavailability>();
-    for (const u of unavailabilities) {
-      map.set(`${u.personId}::${u.date}`, u);
-    }
-    return map;
-  }, [unavailabilities]);
 
   // Per-person stats (for Admin left column)
   const personStats = useMemo(() => {
@@ -531,13 +518,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
         return;
       }
 
-      // Toggle PTO/Unavailability
-      if (matchesCombo(e, shortcuts.pto)) {
-        e.preventDefault();
-        onTogglePto(cells);
-        return;
-      }
-
       // Open Note Editor on focused shift
       if (matchesCombo(e, shortcuts.note)) {
         e.preventDefault();
@@ -589,7 +569,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
     onBatchAssign,
     onBatchDelete,
     onBatchLock,
-    onTogglePto,
     onPaste,
     onUndo,
     openNoteEditorForShift,
@@ -878,7 +857,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 {days.map((date, colIdx) => {
                   const key = `${person.id}::${date}`;
                   const cellShifts = shiftsByCell.get(key) ?? [];
-                  const unavail = unavailByCell.get(key);
                   const { isWeekend } = formatDayHeader(date);
 
                   const isSelected =
@@ -955,11 +933,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                         }
                       }}
                       className={`relative h-14 min-w-[116px] select-none border-b border-r border-slate-200 p-1 align-top transition-colors ${
-                        unavail
-                          ? 'pto-hatched'
-                          : isWeekend
-                            ? 'bg-slate-50/50'
-                            : 'bg-white'
+                        isWeekend ? 'bg-slate-50/50' : 'bg-white'
                       } ${isSelected ? 'bg-blue-50/60' : ''} ${
                         isCopied ? 'marching-ants' : ''
                       }`}
@@ -978,20 +952,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                         outlineOffset: isFocus ? '-2px' : undefined,
                       }}
                     >
-                      {unavail && (
-                        <div
-                          className="mb-1 flex items-center gap-1 rounded bg-slate-200/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
-                          title={isAdmin && unavail.note ? `PTO: ${unavail.note}` : 'Unavailable'}
-                        >
-                          <Slash className="h-2.5 w-2.5 shrink-0" />
-                          <span className="truncate">
-                            {unavail.timeBlock === 'FULL_DAY'
-                              ? 'Unavailable'
-                              : `PTO (${unavail.timeBlock})`}
-                          </span>
-                        </div>
-                      )}
-
                       <div className="flex flex-col gap-1">
                         {cellShifts.map((shift) => {
                           const at = assignmentMap.get(shift.assignmentTypeId);
@@ -1104,15 +1064,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => onTogglePto(getSelectedCellRefs())}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-slate-800"
-            title="Toggle PTO / Unavailable (U)"
-          >
-            <Slash className="h-3 w-3" />
-            <span>PTO</span>
-          </button>
-          <button
-            type="button"
             onClick={() => onBatchDelete(getSelectedCellRefs())}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-red-300 hover:bg-slate-800 hover:text-red-200"
             title="Delete unlocked shifts (Del)"
@@ -1217,7 +1168,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                 const person = personMap.get(cellEditor.personId);
                 const cellKey = `${cellEditor.personId}::${cellEditor.date}`;
                 const cellShifts = shiftsByCell.get(cellKey) ?? [];
-                const unavail = unavailByCell.get(cellKey);
                 if (!person) return null;
 
                 return (
@@ -1354,24 +1304,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                           })}
                         </div>
                       </div>
-
-                      {/* PTO Toggle */}
-                      <div className="border-t border-slate-100 pt-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onTogglePto([{ personId: cellEditor.personId, date: cellEditor.date }])
-                          }
-                          className={`flex w-full items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium ${
-                            unavail
-                              ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
-                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          <Slash className="h-3.5 w-3.5" />
-                          <span>{unavail ? 'Clear PTO / Unavailable' : 'Mark Full-Day PTO'}</span>
-                        </button>
-                      </div>
                     </div>
                   </>
                 );
@@ -1490,7 +1422,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                         <div className="max-h-48 space-y-1 overflow-y-auto pr-0.5">
                           {people.map((p) => {
                             const already = assignedPersonIds.has(p.id);
-                            const unavail = unavailByCell.get(`${p.id}::${cellEditor.date}`);
                             const initials = initialsMap.get(p.id) ?? '?';
                             return (
                               <button
@@ -1514,10 +1445,6 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                                 {already ? (
                                   <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
                                     Assigned
-                                  </span>
-                                ) : unavail ? (
-                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                                    PTO
                                   </span>
                                 ) : (
                                   <Plus className="h-3.5 w-3.5 shrink-0 text-blue-600" />

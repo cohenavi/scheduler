@@ -8,7 +8,6 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Slash,
   Sparkles,
   Trash2,
   Upload,
@@ -22,7 +21,7 @@ import {
   type ShortcutActionId,
   type ShortcutMap,
 } from '../shortcuts';
-import type { AssignmentType, Category, Person, TimeBlock, Unavailability } from '../types';
+import type { AssignmentType, Category, Person } from '../types';
 import { getContrastTextColor } from '../utils';
 
 interface ModalShellProps {
@@ -217,7 +216,7 @@ export const ShortcutsModal: React.FC<{
   ]);
 
   const staticGestures = [
-    ['Click Day Box', 'Open cell editor to assign, lock, note, or mark PTO'],
+    ['Click Day Box', 'Open cell editor to assign, lock, or add note'],
     ['Click & Drag', 'Marquee-select a range of cells'],
     ['Shift + Click / Arrows', 'Extend rectangular selection'],
     ['Escape', 'Close popover or clear selection'],
@@ -361,14 +360,13 @@ export const ShortcutsModal: React.FC<{
   );
 };
 
-// 3. Person Profile & PTO Drawer
+// 3. Person Profile Drawer
 export const PersonDrawer: React.FC<{
   person: Person;
   assignmentTypes: AssignmentType[];
-  unavailabilities: Unavailability[];
   onClose: () => void;
   onRefresh: () => Promise<void>;
-}> = ({ person, assignmentTypes, unavailabilities, onClose, onRefresh }) => {
+}> = ({ person, assignmentTypes, onClose, onRefresh }) => {
   const [name, setName] = useState(person.name);
   const [role, setRole] = useState(person.role);
   const [maxShifts, setMaxShifts] = useState(person.maxShiftsPerWeek?.toString() ?? '');
@@ -377,17 +375,6 @@ export const PersonDrawer: React.FC<{
   const [calendarToken, setCalendarToken] = useState(person.calendarToken ?? '');
   const [rotatingToken, setRotatingToken] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  // Add PTO form
-  const [ptoDate, setPtoDate] = useState('');
-  const [ptoBlock, setPtoBlock] = useState<TimeBlock>('FULL_DAY');
-  const [ptoStart, setPtoStart] = useState('08:00');
-  const [ptoEnd, setPtoEnd] = useState('12:00');
-  const [ptoNote, setPtoNote] = useState('');
-
-  const personUnavails = unavailabilities
-    .filter((u) => u.personId === person.id)
-    .sort((a, b) => a.date.localeCompare(b.date));
 
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -405,22 +392,6 @@ export const PersonDrawer: React.FC<{
     } finally {
       setSaving(false);
     }
-  };
-
-  const addPto = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ptoDate) return;
-    await api.toggleUnavailability({
-      personId: person.id,
-      date: ptoDate,
-      timeBlock: ptoBlock,
-      startTime: ptoBlock === 'CUSTOM' ? ptoStart : null,
-      endTime: ptoBlock === 'CUSTOM' ? ptoEnd : null,
-      note: ptoNote || null,
-    });
-    setPtoDate('');
-    setPtoNote('');
-    await onRefresh();
   };
 
   return (
@@ -545,103 +516,6 @@ export const PersonDrawer: React.FC<{
           </div>
         )}
 
-        {/* PTO / Unavailability Section */}
-        <div className="border-t border-slate-200 pt-4">
-          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-            <Slash className="h-3.5 w-3.5 text-slate-500" />
-            <span>PTO &amp; Unavailability</span>
-          </h3>
-
-          <form onSubmit={addPto} className="mb-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-2.5">
-            <div>
-              <label className="mb-1 block text-[11px] font-medium text-slate-600">Date</label>
-              <input
-                type="date"
-                required
-                value={ptoDate}
-                onChange={(e) => setPtoDate(e.target.value)}
-                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] font-medium text-slate-600">Block</label>
-              <select
-                value={ptoBlock}
-                onChange={(e) => setPtoBlock(e.target.value as TimeBlock)}
-                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
-              >
-                <option value="FULL_DAY">Full Day</option>
-                <option value="AM">AM</option>
-                <option value="PM">PM</option>
-                <option value="CUSTOM">Custom Hours</option>
-              </select>
-            </div>
-            {ptoBlock === 'CUSTOM' && (
-              <>
-                <input
-                  type="time"
-                  value={ptoStart}
-                  onChange={(e) => setPtoStart(e.target.value)}
-                  className="h-7 rounded border border-slate-200 bg-white px-1.5 text-xs"
-                />
-                <input
-                  type="time"
-                  value={ptoEnd}
-                  onChange={(e) => setPtoEnd(e.target.value)}
-                  className="h-7 rounded border border-slate-200 bg-white px-1.5 text-xs"
-                />
-              </>
-            )}
-            <div className="flex-1 min-w-[120px]">
-              <label className="mb-1 block text-[11px] font-medium text-slate-600">Admin Note</label>
-              <input
-                type="text"
-                value={ptoNote}
-                onChange={(e) => setPtoNote(e.target.value)}
-                placeholder="Optional reason..."
-                className="h-7 w-full rounded border border-slate-200 bg-white px-2 text-xs"
-              />
-            </div>
-            <button
-              type="submit"
-              className="inline-flex h-7 items-center gap-1 rounded bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Add</span>
-            </button>
-          </form>
-
-          <div className="max-h-40 space-y-1 overflow-y-auto">
-            {personUnavails.length === 0 ? (
-              <p className="text-xs text-slate-400">No PTO / unavailability entries.</p>
-            ) : (
-              personUnavails.map((u) => (
-                <div
-                  key={u.id}
-                  className="flex items-center justify-between rounded border border-slate-200 px-2.5 py-1.5 text-xs"
-                >
-                  <div>
-                    <span className="font-semibold text-slate-800 tabular-nums">{u.date}</span>
-                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">
-                      {u.timeBlock}
-                    </span>
-                    {u.note && <span className="ml-2 text-slate-500">{u.note}</span>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await api.deleteUnavailability(u.id);
-                      await onRefresh();
-                    }}
-                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
       </div>
     </ModalShell>
   );
@@ -714,7 +588,7 @@ export const RosterModal: React.FC<{
                   }}
                   className="rounded border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  Edit / PTO
+                  Edit Profile
                 </button>
                 <button
                   type="button"
@@ -1083,7 +957,7 @@ export const SettingsModal: React.FC<{
       setResetConfirmText('');
       setStatus({
         type: 'ok',
-        msg: 'All people, categories, assignments, shifts, PTO, rules, and templates have been cleared.',
+        msg: 'All people, categories, assignments, shifts, rules, and templates have been cleared.',
       });
       if (onRefresh) await onRefresh();
     } catch (err) {
@@ -1205,7 +1079,7 @@ export const SettingsModal: React.FC<{
                 <span>Start from Scratch (Reset All Data)</span>
               </div>
               <p className="mt-0.5 text-[11px] text-slate-500">
-                Permanently deletes all staff, categories, assignments, shifts, PTO, rules, and
+                Permanently deletes all staff, categories, assignments, shifts, rules, and
                 templates. Your admin password is preserved.
               </p>
             </div>

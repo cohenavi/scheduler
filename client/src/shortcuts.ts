@@ -2,7 +2,6 @@ export type ShortcutActionId =
   | 'help'
   | 'editCell'
   | 'lock'
-  | 'pto'
   | 'note'
   | 'delete'
   | 'copy'
@@ -42,12 +41,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'lock',
     description: 'Lock / unlock shifts in selection',
     defaultCombo: 'l',
-    adminOnly: true,
-  },
-  {
-    id: 'pto',
-    description: 'Toggle Full-Day PTO / Unavailability',
-    defaultCombo: 'u',
     adminOnly: true,
   },
   {

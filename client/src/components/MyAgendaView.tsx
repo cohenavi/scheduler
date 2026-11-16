@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar, Clock, Lock, MessageSquare, Slash, User } from 'lucide-react';
-import type { AssignmentType, Category, Person, Shift, Unavailability } from '../types';
+import { Calendar, Clock, Lock, MessageSquare, User } from 'lucide-react';
+import type { AssignmentType, Category, Person, Shift } from '../types';
 import { compareShiftsByTime, formatLongDate, getContrastTextColor } from '../utils';
 
 interface MyAgendaViewProps {
@@ -9,7 +9,6 @@ interface MyAgendaViewProps {
   categories: Category[];
   assignmentTypes: AssignmentType[];
   shifts: Shift[];
-  unavailabilities: Unavailability[];
   isAdmin: boolean;
   onOpenSyncCalendar?: () => void;
 }
@@ -22,8 +21,6 @@ export const MyAgendaView: React.FC<MyAgendaViewProps> = ({
   categories,
   assignmentTypes,
   shifts,
-  unavailabilities,
-  isAdmin,
   onOpenSyncCalendar,
 }) => {
   const [selectedPersonId, setSelectedPersonId] = useState<string>(() => {
@@ -58,13 +55,9 @@ export const MyAgendaView: React.FC<MyAgendaViewProps> = ({
           return pA.localeCompare(pB);
         });
 
-      const dayUnavails = unavailabilities.filter(
-        (u) => u.date === date && (selectedPersonId === 'ALL' || u.personId === selectedPersonId)
-      );
-
-      return { date, shifts: dayShifts, unavailabilities: dayUnavails };
+      return { date, shifts: dayShifts };
     });
-  }, [days, shifts, unavailabilities, selectedPersonId, assignmentMap, personMap]);
+  }, [days, shifts, selectedPersonId, assignmentMap, personMap]);
 
   return (
     <div className="mx-auto max-w-2xl px-3 py-4 sm:px-4">
@@ -103,8 +96,8 @@ export const MyAgendaView: React.FC<MyAgendaViewProps> = ({
 
       {/* Chronological Day Cards */}
       <div className="space-y-4">
-        {groupedByDay.map(({ date, shifts: dayShifts, unavailabilities: dayUnavails }) => {
-          const isEmpty = dayShifts.length === 0 && dayUnavails.length === 0;
+        {groupedByDay.map(({ date, shifts: dayShifts }) => {
+          const isEmpty = dayShifts.length === 0;
           return (
             <section
               key={date}
@@ -128,29 +121,6 @@ export const MyAgendaView: React.FC<MyAgendaViewProps> = ({
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {dayUnavails.map((u) => {
-                    const person = personMap.get(u.personId);
-                    return (
-                      <div
-                        key={u.id}
-                        className="pto-hatched flex items-center justify-between px-3.5 py-2.5 text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Slash className="h-3.5 w-3.5 text-slate-500" />
-                          <span className="font-medium text-slate-700">
-                            {person?.name ?? 'Staff'}
-                          </span>
-                          <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-[11px] font-medium text-slate-700">
-                            Unavailable ({u.timeBlock.replace('_', ' ')})
-                          </span>
-                        </div>
-                        {isAdmin && u.note && (
-                          <span className="text-[11px] italic text-slate-500">{u.note}</span>
-                        )}
-                      </div>
-                    );
-                  })}
-
                   {dayShifts.map((shift) => {
                     const person = personMap.get(shift.personId);
                     const at = assignmentMap.get(shift.assignmentTypeId);
