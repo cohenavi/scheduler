@@ -150,31 +150,31 @@ export async function runSeed(): Promise<void> {
   ];
 
   // 3. Create 24 realistic team members
-  const staffSeed: Array<{ name: string; role: string; maxShifts: number; maxHours: number }> = [
-    { name: 'Dr. Elena Rostova', role: 'Attending Physician', maxShifts: 5, maxHours: 45 },
-    { name: 'Dr. Marcus Vance', role: 'Attending Physician', maxShifts: 5, maxHours: 45 },
-    { name: 'Dr. Priya Nair', role: 'Attending Physician', maxShifts: 5, maxHours: 45 },
-    { name: 'Dr. Julian Brooks', role: 'Attending Physician', maxShifts: 4, maxHours: 40 },
-    { name: 'Dr. Hannah Chen', role: 'Senior Resident', maxShifts: 5, maxHours: 50 },
-    { name: 'Dr. Mateo Silva', role: 'Senior Resident', maxShifts: 5, maxHours: 50 },
-    { name: 'Dr. Amir Patel', role: 'Senior Resident', maxShifts: 5, maxHours: 50 },
-    { name: 'Dr. Chloe Bennett', role: 'Resident', maxShifts: 5, maxHours: 48 },
-    { name: 'Dr. Lucas Meyer', role: 'Resident', maxShifts: 5, maxHours: 48 },
-    { name: 'Dr. Zoe Washington', role: 'Resident', maxShifts: 5, maxHours: 48 },
-    { name: 'Sarah Jenkins, NP', role: 'Nurse Practitioner', maxShifts: 5, maxHours: 40 },
-    { name: 'David Kim, PA-C', role: 'Physician Assistant', maxShifts: 5, maxHours: 40 },
-    { name: 'Rachel Alvarez, NP', role: 'Nurse Practitioner', maxShifts: 4, maxHours: 36 },
-    { name: 'Jordan Taylor, PA-C', role: 'Physician Assistant', maxShifts: 5, maxHours: 40 },
-    { name: 'Olivia Foster, RN', role: 'Charge Nurse', maxShifts: 4, maxHours: 40 },
-    { name: 'Liam O’Connor, RN', role: 'Charge Nurse', maxShifts: 4, maxHours: 40 },
-    { name: 'Maya Lin, RN', role: 'Staff Nurse', maxShifts: 4, maxHours: 36 },
-    { name: 'Noah Campbell, RN', role: 'Staff Nurse', maxShifts: 4, maxHours: 36 },
-    { name: 'Sofia Morales, RN', role: 'Staff Nurse', maxShifts: 4, maxHours: 36 },
-    { name: 'Ethan Wright, RN', role: 'Staff Nurse', maxShifts: 4, maxHours: 36 },
-    { name: 'Grace Park, PharmD', role: 'Clinical Pharmacist', maxShifts: 5, maxHours: 40 },
-    { name: 'Daniel Cho, PharmD', role: 'Clinical Pharmacist', maxShifts: 5, maxHours: 40 },
-    { name: 'Lauren Hughes', role: 'Care Coordinator', maxShifts: 5, maxHours: 40 },
-    { name: 'Benjamin Hayes', role: 'Operations Lead', maxShifts: 5, maxHours: 40 },
+  const staffSeed: Array<{ name: string; role: string }> = [
+    { name: 'Dr. Elena Rostova', role: 'Attending Physician' },
+    { name: 'Dr. Marcus Vance', role: 'Attending Physician' },
+    { name: 'Dr. Priya Nair', role: 'Attending Physician' },
+    { name: 'Dr. Julian Brooks', role: 'Attending Physician' },
+    { name: 'Dr. Hannah Chen', role: 'Senior Resident' },
+    { name: 'Dr. Mateo Silva', role: 'Senior Resident' },
+    { name: 'Dr. Amir Patel', role: 'Senior Resident' },
+    { name: 'Dr. Chloe Bennett', role: 'Resident' },
+    { name: 'Dr. Lucas Meyer', role: 'Resident' },
+    { name: 'Dr. Zoe Washington', role: 'Resident' },
+    { name: 'Sarah Jenkins, NP', role: 'Nurse Practitioner' },
+    { name: 'David Kim, PA-C', role: 'Physician Assistant' },
+    { name: 'Rachel Alvarez, NP', role: 'Nurse Practitioner' },
+    { name: 'Jordan Taylor, PA-C', role: 'Physician Assistant' },
+    { name: 'Olivia Foster, RN', role: 'Charge Nurse' },
+    { name: 'Liam O’Connor, RN', role: 'Charge Nurse' },
+    { name: 'Maya Lin, RN', role: 'Staff Nurse' },
+    { name: 'Noah Campbell, RN', role: 'Staff Nurse' },
+    { name: 'Sofia Morales, RN', role: 'Staff Nurse' },
+    { name: 'Ethan Wright, RN', role: 'Staff Nurse' },
+    { name: 'Grace Park, PharmD', role: 'Clinical Pharmacist' },
+    { name: 'Daniel Cho, PharmD', role: 'Clinical Pharmacist' },
+    { name: 'Lauren Hughes', role: 'Care Coordinator' },
+    { name: 'Benjamin Hayes', role: 'Operations Lead' },
   ];
 
   const people: Array<{ id: string }> = [];
@@ -184,8 +184,6 @@ export async function runSeed(): Promise<void> {
       data: {
         name: s.name,
         role: s.role,
-        maxShiftsPerWeek: s.maxShifts,
-        maxHoursPerWeek: s.maxHours,
         sortOrder: i + 1,
         allowedAssignments: {
           connect: allAssignmentIds.map((id) => ({ id })),
@@ -415,29 +413,34 @@ async function seedMilestone2Defaults(): Promise<void> {
           priority: 4,
         },
         {
-          name: '12-Hour Post-Call Rest Turnaround',
-          ruleType: 'MUTUAL_EXCLUSION_AND_REST',
+          name: 'Attending Weekly Admin Minimum (1 day/wk)',
+          ruleType: 'ASSIGNMENT_QUOTA',
           enforcement: 'SOFT_WARN',
-          assignmentTypeId: callAt?.id ?? null,
+          assignmentTypeId: adminAt?.id ?? null,
           config: {
-            mode: 'MIN_REST_HOURS',
-            minRestHours: 12,
-            fromAssignmentTypeId: callAt?.id ?? null,
+            targetType: 'ASSIGNMENT',
+            assignmentTypeId: adminAt?.id ?? null,
+            minDaysPerWeek: 1,
+            role: 'Attending Physician',
+            onlyQualified: true,
           },
           isActive: true,
           priority: 5,
         },
         {
-          name: 'Weekly Shift & Hour Cap',
-          ruleType: 'WORKLOAD_CAP',
+          name: 'Max 2 Weekends per 4 Weeks',
+          ruleType: 'WEEKEND_CAP',
           enforcement: 'SOFT_WARN',
-          config: {},
+          config: {
+            maxWeekends: 2,
+            periodWeeks: 4,
+          },
           isActive: true,
           priority: 6,
         },
       ],
     });
-    console.log('Seeded 6 Milestone 2 Constraint Rules.');
+    console.log('Seeded 6 Attending-Focused Constraint Rules.');
   }
 
   if (tplCount === 0 && people.length >= 16 && clinicAt && amAt && pmAt && adminAt && callAt) {

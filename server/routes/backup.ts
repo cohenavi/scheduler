@@ -94,8 +94,6 @@ backupRouter.get('/backup', async (req, res) => {
       name: p.name,
       role: p.role,
       calendarToken: p.calendarToken,
-      maxShiftsPerWeek: p.maxShiftsPerWeek,
-      maxHoursPerWeek: p.maxHoursPerWeek,
       sortOrder: p.sortOrder,
       allowedAssignmentIds: p.allowedAssignments.map((a) => a.id),
     }));
@@ -196,8 +194,6 @@ backupRouter.post('/restore', async (req, res) => {
             name: p.name,
             role: p.role,
             calendarToken: p.calendarToken,
-            maxShiftsPerWeek: p.maxShiftsPerWeek ?? null,
-            maxHoursPerWeek: p.maxHoursPerWeek ?? null,
             sortOrder: p.sortOrder ?? 0,
             ...(Array.isArray(p.allowedAssignmentIds) && p.allowedAssignmentIds.length > 0
               ? {
@@ -354,8 +350,6 @@ backupRouter.get('/config-export', async (req, res) => {
           id: p.id,
           name: p.name,
           role: p.role,
-          maxShiftsPerWeek: p.maxShiftsPerWeek,
-          maxHoursPerWeek: p.maxHoursPerWeek,
           sortOrder: p.sortOrder,
           allowedAssignmentIds: p.allowedAssignments.map((a) => a.id),
           allowedAssignmentShortCodes: p.allowedAssignments.map((a) => a.shortCode),
@@ -596,8 +590,6 @@ backupRouter.post('/config-import', async (req, res) => {
               data: {
                 name: p.name,
                 role: p.role,
-                maxShiftsPerWeek: p.maxShiftsPerWeek ?? null,
-                maxHoursPerWeek: p.maxHoursPerWeek ?? null,
                 sortOrder: p.sortOrder ?? 0,
                 allowedAssignments: { set: connectList },
               },
@@ -610,8 +602,6 @@ backupRouter.post('/config-import', async (req, res) => {
                 id: p.id,
                 name: p.name,
                 role: p.role,
-                maxShiftsPerWeek: p.maxShiftsPerWeek ?? null,
-                maxHoursPerWeek: p.maxHoursPerWeek ?? null,
                 sortOrder: p.sortOrder ?? 0,
                 allowedAssignments: { connect: connectList },
               },

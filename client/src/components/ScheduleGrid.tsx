@@ -115,14 +115,21 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
   const [savingNote, setSavingNote] = useState(false);
   const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const violationsByShiftId = useMemo(() => {
-    const map = new Map<string, ConstraintViolation[]>();
+  const { violationsByShiftId, quotaViolationsByPersonId } = useMemo(() => {
+    const shiftMap = new Map<string, ConstraintViolation[]>();
+    const personMap = new Map<string, ConstraintViolation[]>();
     for (const v of violations) {
-      const arr = map.get(v.shiftId) ?? [];
-      arr.push(v);
-      map.set(v.shiftId, arr);
+      if (v.shiftId) {
+        const arr = shiftMap.get(v.shiftId) ?? [];
+        arr.push(v);
+        shiftMap.set(v.shiftId, arr);
+      } else {
+        const arr = personMap.get(v.personId) ?? [];
+        arr.push(v);
+        personMap.set(v.personId, arr);
+      }
     }
-    return map;
+    return { violationsByShiftId: shiftMap, quotaViolationsByPersonId: personMap };
   }, [violations]);
 
   const assignmentMap = useMemo(
@@ -612,12 +619,15 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
             <div className="mt-2 max-h-36 space-y-1 overflow-y-auto border-t border-amber-200/70 pt-1.5">
               {violations.map((v, i) => (
                 <div
-                  key={`${v.shiftId}-${v.ruleId}-${i}`}
+                  key={`${v.shiftId ?? 'quota'}-${v.personId}-${v.date}-${v.ruleId}-${i}`}
                   className="flex items-center justify-between gap-2 rounded bg-white/80 px-2 py-1 text-[11px] text-slate-800"
                 >
                   <div>
                     <span className="font-semibold">{v.personName}</span> •{' '}
-                    <span className="tabular-nums">{v.date}</span> [{v.assignmentShortCode}]:{' '}
+                    <span className="tabular-nums">
+                      {v.shiftId ? v.date : `Week of ${v.date}`}
+                    </span>{' '}
+                    [{v.assignmentShortCode}]:{' '}
                     <span className="text-red-700">{v.message}</span>
                   </div>
                   <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
@@ -827,6 +837,7 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
               })
             : people.map((person, rowIdx) => {
             const stats = personStats.get(person.id) ?? { count: 0, hours: 0 };
+            const personQuotas = isAdmin ? quotaViolationsByPersonId.get(person.id) ?? [] : [];
             return (
               <tr key={person.id} className="group hover:bg-slate-50/40">
                 {/* Sticky Person Column */}
@@ -837,8 +848,19 @@ export const ScheduleGrid: React.FC<ScheduleGridProps> = ({
                       onClick={() => isAdmin && onOpenPersonDrawer(person)}
                       className={`text-left ${isAdmin ? 'hover:text-blue-600 cursor-pointer' : 'cursor-default'}`}
                     >
-                      <div className="truncate font-semibold text-slate-900 max-w-[135px]">
-                        {person.name}
+                      <div className="flex items-center gap-1">
+                        <span className="truncate font-semibold text-slate-900 max-w-[125px]">
+                          {person.name}
+                        </span>
+                        {personQuotas.length > 0 && (
+                          <span
+                            title={personQuotas.map((q) => q.message).join('\n')}
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-800"
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            {personQuotas.length}
+                          </span>
+                        )}
                       </div>
                       <div className="truncate text-[10px] text-slate-500 max-w-[135px]">
                         {person.role}

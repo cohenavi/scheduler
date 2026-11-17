@@ -11,8 +11,6 @@ export interface Person {
   role: string;
   sortOrder: number;
   calendarToken?: string;
-  maxShiftsPerWeek?: number | null;
-  maxHoursPerWeek?: number | null;
   allowedAssignmentIds?: string[];
 }
 
@@ -74,11 +72,12 @@ export interface ConstraintRule {
 }
 
 export interface ConstraintViolation {
-  shiftId: string;
+  shiftId: string | null;
   personId: string;
   personName: string;
   date: string;
-  assignmentTypeId: string;
+  weekStart?: string;
+  assignmentTypeId: string | null;
   assignmentShortCode: string;
   ruleId: string;
   ruleName: string;

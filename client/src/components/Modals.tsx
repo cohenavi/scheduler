@@ -370,8 +370,6 @@ export const PersonDrawer: React.FC<{
 }> = ({ person, assignmentTypes, onClose, onRefresh }) => {
   const [name, setName] = useState(person.name);
   const [role, setRole] = useState(person.role);
-  const [maxShifts, setMaxShifts] = useState(person.maxShiftsPerWeek?.toString() ?? '');
-  const [maxHours, setMaxHours] = useState(person.maxHoursPerWeek?.toString() ?? '');
   const [allowedIds, setAllowedIds] = useState<string[]>(person.allowedAssignmentIds ?? []);
   const [calendarToken, setCalendarToken] = useState(person.calendarToken ?? '');
   const [rotatingToken, setRotatingToken] = useState(false);
@@ -384,8 +382,6 @@ export const PersonDrawer: React.FC<{
       await api.updatePerson(person.id, {
         name,
         role,
-        maxShiftsPerWeek: maxShifts ? Number(maxShifts) : null,
-        maxHoursPerWeek: maxHours ? Number(maxHours) : null,
         allowedAssignmentIds: allowedIds,
       });
       await onRefresh();
@@ -413,28 +409,6 @@ export const PersonDrawer: React.FC<{
               <input
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Max Shifts / Week
-              </label>
-              <input
-                type="number"
-                value={maxShifts}
-                onChange={(e) => setMaxShifts(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Max Hours / Week
-              </label>
-              <input
-                type="number"
-                value={maxHours}
-                onChange={(e) => setMaxHours(e.target.value)}
                 className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
               />
             </div>

@@ -2,6 +2,7 @@ import { PublishStatus, type AssignmentType, type Category, type ConstraintRule 
 import {
   evaluateSchedule,
   getDayOfWeekFromYMD,
+  getMondayYMD,
   getShiftInterval,
   type PersonWithAllowed,
   type ShiftLike,
@@ -231,18 +232,74 @@ export async function runAutoScheduler(options: AutoGenerateOptions) {
         ctx.unavailabilities,
         ctx.people,
         ctx.assignmentTypes,
-        solverRules
+        solverRules,
+        { evalStartDate: startDate, evalEndDate: endDate }
       );
 
-      // Any violation on the candidate (hard block or solver rule) disqualifies unless only soft workload
+      // Any violation on the candidate shift disqualifies if HARD_BLOCK, WEEKEND_CAP, or max ASSIGNMENT_QUOTA
       const candidateViolations = violations.filter((v) => v.shiftId === tempId);
       const hasDisqualifying = candidateViolations.some(
-        (v) => v.enforcement === 'HARD_BLOCK' || v.ruleType === 'WORKLOAD_CAP'
+        (v) =>
+          v.enforcement === 'HARD_BLOCK' ||
+          v.ruleType === 'WEEKEND_CAP' ||
+          v.ruleType === 'ASSIGNMENT_QUOTA'
       );
       if (hasDisqualifying) continue;
 
-      // Fairness Scoring:
-      // 1. Lowest cumulative hours in this Category
+      // Fairness & Quota Scoring (lower score = higher priority):
+      // 1. Strong bonus if candidate satisfies an unmet ASSIGNMENT_QUOTA minDaysPerWeek
+      const weekStart = getMondayYMD(date);
+      let quotaBonus = 0;
+      for (const rule of solverRules) {
+        if (!rule.isActive || rule.ruleType !== 'ASSIGNMENT_QUOTA') continue;
+        if (rule.personId && rule.personId !== person.id) continue;
+        const cfg = (rule.config ?? {}) as Record<string, unknown>;
+        if (
+          cfg.role &&
+          typeof cfg.role === 'string' &&
+          cfg.role.trim() &&
+          person.role.trim().toLowerCase() !== cfg.role.trim().toLowerCase()
+        ) {
+          continue;
+        }
+        const minDays =
+          cfg.minDaysPerWeek !== undefined && cfg.minDaysPerWeek !== null && cfg.minDaysPerWeek !== ''
+            ? Number(cfg.minDaysPerWeek)
+            : null;
+        if (!minDays || Number.isNaN(minDays) || minDays <= 0) continue;
+
+        const targetType =
+          cfg.targetType === 'CATEGORY' || (!cfg.assignmentTypeId && !rule.assignmentTypeId && cfg.categoryId)
+            ? 'CATEGORY'
+            : 'ASSIGNMENT';
+        const targetAtId = cfg.assignmentTypeId ? String(cfg.assignmentTypeId) : rule.assignmentTypeId;
+        const targetCatId = cfg.categoryId ? String(cfg.categoryId) : null;
+
+        const slotMatches =
+          targetType === 'CATEGORY'
+            ? Boolean(targetCatId && at.categoryId === targetCatId)
+            : Boolean(targetAtId && at.id === targetAtId);
+        if (!slotMatches) continue;
+
+        const distinctDays = new Set(
+          workingShifts
+            .filter((s) => {
+              if (s.personId !== person.id) return false;
+              if (getMondayYMD(s.date) !== weekStart) return false;
+              const sAt = atMap.get(s.assignmentTypeId);
+              if (!sAt) return false;
+              return targetType === 'CATEGORY'
+                ? Boolean(targetCatId && sAt.categoryId === targetCatId)
+                : Boolean(targetAtId && sAt.id === targetAtId);
+            })
+            .map((s) => s.date)
+        );
+        if (distinctDays.size < minDays) {
+          quotaBonus -= 1000;
+        }
+      }
+
+      // 2. Lowest cumulative hours in this Category & total hours
       let catHours = 0;
       let totalHours = 0;
       let adjacentSameCount = 0;
@@ -263,8 +320,7 @@ export async function runAutoScheduler(options: AutoGenerateOptions) {
         }
       }
 
-      const capRatio = person.maxHoursPerWeek ? totalHours / person.maxHoursPerWeek : totalHours / 40;
-      const score = catHours * 10 + capRatio * 20 + adjacentSameCount * 15;
+      const score = quotaBonus + catHours * 10 + totalHours * 0.5 + adjacentSameCount * 15;
       validCandidates.push({ person, score });
     }
 
@@ -274,7 +330,7 @@ export async function runAutoScheduler(options: AutoGenerateOptions) {
         assignmentTypeId: at.id,
         assignmentName: at.name,
         shortCode: at.shortCode,
-        reason: 'No qualified staff available without violating PTO, overlap, rest gap, or weekly caps',
+        reason: 'No qualified staff available without violating PTO, overlap, exclusion, or quota/weekend rules',
       });
       continue;
     }

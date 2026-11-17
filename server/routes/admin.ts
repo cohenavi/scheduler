@@ -10,7 +10,7 @@ adminRouter.use(requireAdmin);
 // --- People CRUD ---
 adminRouter.post('/people', async (req, res) => {
   try {
-    const { name, role, maxShiftsPerWeek, maxHoursPerWeek, allowedAssignmentIds } = req.body ?? {};
+    const { name, role, allowedAssignmentIds } = req.body ?? {};
     if (!name || !role) {
       res.status(400).json({ error: 'Name and role are required' });
       return;
@@ -21,8 +21,6 @@ adminRouter.post('/people', async (req, res) => {
       data: {
         name: String(name).trim(),
         role: String(role).trim(),
-        maxShiftsPerWeek: maxShiftsPerWeek ? Number(maxShiftsPerWeek) : null,
-        maxHoursPerWeek: maxHoursPerWeek ? Number(maxHoursPerWeek) : null,
         sortOrder: (maxOrder._max.sortOrder ?? 0) + 1,
         ...(Array.isArray(allowedAssignmentIds)
           ? { allowedAssignments: { connect: allowedAssignmentIds.map((id: string) => ({ id })) } }
@@ -44,19 +42,13 @@ adminRouter.post('/people', async (req, res) => {
 adminRouter.patch('/people/:id', async (req, res) => {
   try {
     const id = String(req.params.id);
-    const { name, role, maxShiftsPerWeek, maxHoursPerWeek, sortOrder, allowedAssignmentIds } = req.body ?? {};
+    const { name, role, sortOrder, allowedAssignmentIds } = req.body ?? {};
 
     const person = await prisma.person.update({
       where: { id },
       data: {
         ...(name !== undefined ? { name: String(name).trim() } : {}),
         ...(role !== undefined ? { role: String(role).trim() } : {}),
-        ...(maxShiftsPerWeek !== undefined
-          ? { maxShiftsPerWeek: maxShiftsPerWeek === null || maxShiftsPerWeek === '' ? null : Number(maxShiftsPerWeek) }
-          : {}),
-        ...(maxHoursPerWeek !== undefined
-          ? { maxHoursPerWeek: maxHoursPerWeek === null || maxHoursPerWeek === '' ? null : Number(maxHoursPerWeek) }
-          : {}),
         ...(sortOrder !== undefined ? { sortOrder: Number(sortOrder) } : {}),
         ...(Array.isArray(allowedAssignmentIds)
           ? { allowedAssignments: { set: allowedAssignmentIds.map((aid: string) => ({ id: aid })) } }

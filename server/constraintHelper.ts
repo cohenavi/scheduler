@@ -27,8 +27,6 @@ export async function loadScheduleContext(viewMode: PublishStatus = PublishStatu
     id: p.id,
     name: p.name,
     role: p.role,
-    maxShiftsPerWeek: p.maxShiftsPerWeek,
-    maxHoursPerWeek: p.maxHoursPerWeek,
     allowedAssignmentIds: p.allowedAssignments.map((a) => a.id),
   }));
 
@@ -66,7 +64,9 @@ export function checkCandidateHardBlocks(
     ctx.assignmentTypes,
     ctx.rules
   );
-  const candidateViolations = violations.filter((v) => candidateIds.has(v.shiftId));
+  const candidateViolations = violations.filter(
+    (v) => v.shiftId !== null && candidateIds.has(v.shiftId)
+  );
   const hardBlocks = candidateViolations.filter((v) => v.enforcement === 'HARD_BLOCK');
   return { hardBlocks, allViolations: candidateViolations };
 }

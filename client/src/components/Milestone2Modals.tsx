@@ -71,11 +71,25 @@ export const RulesEngineModal: React.FC<{
   const [loading, setLoading] = useState(true);
 
   const [name, setName] = useState('');
-  const [ruleType, setRuleType] = useState('MUTUAL_EXCLUSION_AND_REST');
+  const [ruleType, setRuleType] = useState('ASSIGNMENT_QUOTA');
   const [enforcement, setEnforcement] = useState<'HARD_BLOCK' | 'SOFT_WARN'>('SOFT_WARN');
-  const [restMode, setRestMode] = useState<'MIN_REST_HOURS' | 'SAME_DAY_EXCLUSION'>('MIN_REST_HOURS');
-  const [minRestHours, setMinRestHours] = useState(12);
-  const [fromAtId, setFromAtId] = useState(assignmentTypes[0]?.id ?? '');
+
+  // ASSIGNMENT_QUOTA state
+  const [quotaTargetType, setQuotaTargetType] = useState<'ASSIGNMENT' | 'CATEGORY'>('ASSIGNMENT');
+  const [quotaAtId, setQuotaAtId] = useState(assignmentTypes[0]?.id ?? '');
+  const [quotaCatId, setQuotaCatId] = useState(categories[0]?.id ?? '');
+  const [minDaysPerWeek, setMinDaysPerWeek] = useState<string>('1');
+  const [maxDaysPerWeek, setMaxDaysPerWeek] = useState<string>('');
+  const [quotaRole, setQuotaRole] = useState('Attending Physician');
+  const [onlyQualified, setOnlyQualified] = useState(true);
+
+  // WEEKEND_CAP state
+  const [maxWeekends, setMaxWeekends] = useState(2);
+  const [periodWeeks, setPeriodWeeks] = useState(4);
+  const [weekendCatId, setWeekendCatId] = useState('');
+  const [weekendRole, setWeekendRole] = useState('');
+
+  // SAME_DAY_EXCLUSION state
   const [atIdA, setAtIdA] = useState(assignmentTypes[0]?.id ?? '');
   const [atIdB, setAtIdB] = useState(assignmentTypes[1]?.id ?? assignmentTypes[0]?.id ?? '');
 
@@ -93,20 +107,87 @@ export const RulesEngineModal: React.FC<{
     loadRules();
   }, []);
 
+  const formatRuleSummary = (rule: ConstraintRule): string => {
+    const cfg = (rule.config ?? {}) as Record<string, unknown>;
+    if (rule.ruleType === 'ASSIGNMENT_QUOTA') {
+      const parts: string[] = ['Weekly Quota'];
+      if (cfg.targetType === 'CATEGORY' && cfg.categoryId) {
+        const cat = categories.find((c) => c.id === String(cfg.categoryId));
+        parts.push(cat ? `Cat: ${cat.name}` : 'Category');
+      } else {
+        const atId = String(cfg.assignmentTypeId || rule.assignmentTypeId || '');
+        const at = assignmentTypes.find((a) => a.id === atId);
+        if (at) parts.push(at.shortCode);
+      }
+      if (cfg.minDaysPerWeek != null && cfg.minDaysPerWeek !== '') {
+        parts.push(`Min ${cfg.minDaysPerWeek}d/wk`);
+      }
+      if (cfg.maxDaysPerWeek != null && cfg.maxDaysPerWeek !== '') {
+        parts.push(`Max ${cfg.maxDaysPerWeek}d/wk`);
+      }
+      if (cfg.role && String(cfg.role).trim()) {
+        parts.push(`Role: ${String(cfg.role)}`);
+      }
+      return parts.join(' • ');
+    }
+    if (rule.ruleType === 'WEEKEND_CAP') {
+      const maxW = cfg.maxWeekends ?? 2;
+      const perW = cfg.periodWeeks ?? 4;
+      const parts = [`Max ${maxW} weekends / ${perW} wks`];
+      if (cfg.categoryId) {
+        const cat = categories.find((c) => c.id === String(cfg.categoryId));
+        if (cat) parts.push(`Cat: ${cat.name}`);
+      }
+      if (cfg.role && String(cfg.role).trim()) {
+        parts.push(`Role: ${String(cfg.role)}`);
+      }
+      return parts.join(' • ');
+    }
+    if (rule.ruleType === 'SAME_DAY_EXCLUSION') {
+      const a = assignmentTypes.find((x) => x.id === String(cfg.assignmentTypeIdA || ''));
+      const b = assignmentTypes.find((x) => x.id === String(cfg.assignmentTypeIdB || ''));
+      if (a && b) return `Same-Day Exclusion • ${a.shortCode} ≠ ${b.shortCode}`;
+      return 'Same-Day Exclusion';
+    }
+    return rule.ruleType;
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    const config =
-      ruleType === 'MUTUAL_EXCLUSION_AND_REST'
-        ? restMode === 'MIN_REST_HOURS'
-          ? { mode: 'MIN_REST_HOURS', minRestHours, fromAssignmentTypeId: fromAtId || null }
-          : { mode: 'SAME_DAY_EXCLUSION', assignmentTypeIdA: atIdA, assignmentTypeIdB: atIdB }
-        : {};
+
+    let config: Record<string, unknown> = {};
+    let assignmentTypeId: string | null = null;
+
+    if (ruleType === 'ASSIGNMENT_QUOTA') {
+      const selectedCat = categories.find((c) => c.id === quotaCatId);
+      config = {
+        targetType: quotaTargetType,
+        assignmentTypeId: quotaTargetType === 'ASSIGNMENT' ? quotaAtId || null : null,
+        categoryId: quotaTargetType === 'CATEGORY' ? quotaCatId || null : null,
+        categoryName: quotaTargetType === 'CATEGORY' ? selectedCat?.name ?? null : null,
+        minDaysPerWeek: minDaysPerWeek !== '' ? Number(minDaysPerWeek) : null,
+        maxDaysPerWeek: maxDaysPerWeek !== '' ? Number(maxDaysPerWeek) : null,
+        role: quotaRole.trim() || null,
+        onlyQualified,
+      };
+      if (quotaTargetType === 'ASSIGNMENT') assignmentTypeId = quotaAtId || null;
+    } else if (ruleType === 'WEEKEND_CAP') {
+      config = {
+        maxWeekends,
+        periodWeeks,
+        categoryId: weekendCatId || null,
+        role: weekendRole.trim() || null,
+      };
+    } else if (ruleType === 'SAME_DAY_EXCLUSION') {
+      config = { assignmentTypeIdA: atIdA, assignmentTypeIdB: atIdB };
+    }
 
     await api.createRule({
       name: name.trim(),
       ruleType,
       enforcement,
+      assignmentTypeId,
       config,
       isActive: true,
     });
@@ -119,9 +200,10 @@ export const RulesEngineModal: React.FC<{
     <ModalShell title="Rules & Constraints Engine" onClose={onClose} maxWidth="max-w-3xl">
       <div className="space-y-4">
         <p className="text-xs text-slate-500">
-          Rules are evaluated automatically on every single-cell edit, drag-and-drop, batch hotkey,
-          template stamp, and auto-schedule run. Toggle <strong>Hard Block</strong> to reject
-          violating mutations at the API level, or <strong>Soft Warn</strong> to flag them on the grid.
+          Attending-focused rules evaluated on every schedule edit, template stamp, and auto-schedule
+          run. Toggle <strong>Hard Block</strong> to reject violating edits at the API level, or{' '}
+          <strong>Soft Warn</strong> to flag them on the grid (minimum weekly quotas always evaluate
+          as Soft Warnings).
         </p>
 
         {/* Rule List */}
@@ -130,7 +212,10 @@ export const RulesEngineModal: React.FC<{
         ) : (
           <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
             {rules.map((rule) => (
-              <div key={rule.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs">
+              <div
+                key={rule.id}
+                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs"
+              >
                 <div className="flex items-center gap-2.5">
                   <input
                     type="checkbox"
@@ -144,14 +229,7 @@ export const RulesEngineModal: React.FC<{
                   />
                   <div>
                     <div className="font-semibold text-slate-900">{rule.name}</div>
-                    <div className="text-[11px] text-slate-500">
-                      {rule.ruleType}
-                      {rule.ruleType === 'MUTUAL_EXCLUSION_AND_REST' &&
-                        rule.config &&
-                        ` • ${String(rule.config.mode || '')}${
-                          rule.config.minRestHours ? ` (${rule.config.minRestHours}h)` : ''
-                        }`}
-                    </div>
+                    <div className="text-[11px] text-slate-500">{formatRuleSummary(rule)}</div>
                   </div>
                 </div>
 
@@ -205,7 +283,7 @@ export const RulesEngineModal: React.FC<{
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Rule Name (e.g. No Clinic + Call)"
+              placeholder="Rule Name (e.g. 1 Admin Day/Wk)"
               className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
             />
             <select
@@ -213,11 +291,13 @@ export const RulesEngineModal: React.FC<{
               onChange={(e) => setRuleType(e.target.value)}
               className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
             >
-              <option value="MUTUAL_EXCLUSION_AND_REST">Turnaround Rest / Mutual Exclusion</option>
+              <option value="ASSIGNMENT_QUOTA">Weekly Assignment Quota (Min/Max)</option>
+              <option value="WEEKEND_CAP">Weekend Fairness Cap</option>
+              <option value="SAME_DAY_EXCLUSION">Same-Day Mutual Exclusion</option>
               <option value="QUALIFICATION">Qualification Confinement</option>
               <option value="DAY_OF_WEEK">Day-of-Week Validity</option>
               <option value="TIME_OVERLAP">Time-Overlap Prevention</option>
-              <option value="WORKLOAD_CAP">Workload &amp; Hour Cap</option>
+              <option value="PTO_CONFLICT">PTO / Unavailability Conflict</option>
             </select>
             <select
               value={enforcement}
@@ -229,70 +309,166 @@ export const RulesEngineModal: React.FC<{
             </select>
           </div>
 
-          {ruleType === 'MUTUAL_EXCLUSION_AND_REST' && (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <select
-                value={restMode}
-                onChange={(e) =>
-                  setRestMode(e.target.value as 'MIN_REST_HOURS' | 'SAME_DAY_EXCLUSION')
-                }
-                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
-              >
-                <option value="MIN_REST_HOURS">Minimum Rest Hours After Assignment</option>
-                <option value="SAME_DAY_EXCLUSION">Same-Day Mutual Exclusion Pair</option>
-              </select>
+          {ruleType === 'ASSIGNMENT_QUOTA' && (
+            <div className="space-y-2 rounded border border-slate-200 bg-white p-2.5 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={quotaTargetType}
+                  onChange={(e) =>
+                    setQuotaTargetType(e.target.value as 'ASSIGNMENT' | 'CATEGORY')
+                  }
+                  className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
+                >
+                  <option value="ASSIGNMENT">Specific Assignment</option>
+                  <option value="CATEGORY">Entire Category</option>
+                </select>
 
-              {restMode === 'MIN_REST_HOURS' ? (
-                <>
+                {quotaTargetType === 'ASSIGNMENT' ? (
                   <select
-                    value={fromAtId}
-                    onChange={(e) => setFromAtId(e.target.value)}
+                    value={quotaAtId}
+                    onChange={(e) => setQuotaAtId(e.target.value)}
                     className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
                   >
-                    <option value="">Any Assignment</option>
                     {assignmentTypes.map((a) => (
                       <option key={a.id} value={a.id}>
-                        After {a.shortCode} ({a.name})
+                        {a.shortCode} — {a.name}
                       </option>
                     ))}
                   </select>
+                ) : (
+                  <select
+                    value={quotaCatId}
+                    onChange={(e) => setQuotaCatId(e.target.value)}
+                    className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <label className="flex items-center gap-1 text-slate-600">
+                  <span>Min days/wk:</span>
                   <input
                     type="number"
-                    min={1}
-                    max={48}
-                    value={minRestHours}
-                    onChange={(e) => setMinRestHours(Number(e.target.value))}
-                    className="h-7 w-20 rounded border border-slate-200 bg-white px-2 text-xs"
+                    min={0}
+                    max={7}
+                    value={minDaysPerWeek}
+                    onChange={(e) => setMinDaysPerWeek(e.target.value)}
+                    placeholder="e.g. 1"
+                    className="h-7 w-14 rounded border border-slate-200 px-1.5 text-xs"
                   />
-                  <span className="text-slate-500">hours rest</span>
-                </>
-              ) : (
-                <>
-                  <select
-                    value={atIdA}
-                    onChange={(e) => setAtIdA(e.target.value)}
-                    className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
-                  >
-                    {assignmentTypes.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.shortCode}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-slate-500">cannot share day with</span>
-                  <select
-                    value={atIdB}
-                    onChange={(e) => setAtIdB(e.target.value)}
-                    className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
-                  >
-                    {assignmentTypes.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.shortCode}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
+                </label>
+
+                <label className="flex items-center gap-1 text-slate-600">
+                  <span>Max days/wk:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={7}
+                    value={maxDaysPerWeek}
+                    onChange={(e) => setMaxDaysPerWeek(e.target.value)}
+                    placeholder="—"
+                    className="h-7 w-14 rounded border border-slate-200 px-1.5 text-xs"
+                  />
+                </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-1 text-slate-600">
+                  <span>Role filter:</span>
+                  <input
+                    value={quotaRole}
+                    onChange={(e) => setQuotaRole(e.target.value)}
+                    placeholder="All roles"
+                    className="h-7 w-40 rounded border border-slate-200 px-2 text-xs"
+                  />
+                </label>
+
+                <label className="flex items-center gap-1.5 text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={onlyQualified}
+                    onChange={(e) => setOnlyQualified(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
+                  />
+                  <span>Only qualified staff</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {ruleType === 'WEEKEND_CAP' && (
+            <div className="flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-white p-2.5 text-xs">
+              <span className="text-slate-600">Max</span>
+              <input
+                type="number"
+                min={0}
+                max={12}
+                value={maxWeekends}
+                onChange={(e) => setMaxWeekends(Number(e.target.value))}
+                className="h-7 w-14 rounded border border-slate-200 px-1.5 text-xs"
+              />
+              <span className="text-slate-600">weekends per</span>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={periodWeeks}
+                onChange={(e) => setPeriodWeeks(Number(e.target.value))}
+                className="h-7 w-14 rounded border border-slate-200 px-1.5 text-xs"
+              />
+              <span className="text-slate-600">weeks</span>
+
+              <select
+                value={weekendCatId}
+                onChange={(e) => setWeekendCatId(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
+              >
+                <option value="">All Categories</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} only
+                  </option>
+                ))}
+              </select>
+
+              <input
+                value={weekendRole}
+                onChange={(e) => setWeekendRole(e.target.value)}
+                placeholder="Role filter (optional)"
+                className="h-7 w-36 rounded border border-slate-200 px-2 text-xs"
+              />
+            </div>
+          )}
+
+          {ruleType === 'SAME_DAY_EXCLUSION' && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <select
+                value={atIdA}
+                onChange={(e) => setAtIdA(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
+              >
+                {assignmentTypes.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.shortCode}
+                  </option>
+                ))}
+              </select>
+              <span className="text-slate-500">cannot share day with</span>
+              <select
+                value={atIdB}
+                onChange={(e) => setAtIdB(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs"
+              >
+                {assignmentTypes.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.shortCode}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 
@@ -306,7 +482,6 @@ export const RulesEngineModal: React.FC<{
             </button>
           </div>
         </form>
-        {void categories}
       </div>
     </ModalShell>
   );

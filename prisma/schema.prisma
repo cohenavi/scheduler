@@ -25,8 +25,6 @@ model Person {
   name               String
   role               String
   calendarToken      String           @unique @default(uuid())
-  maxShiftsPerWeek   Int?
-  maxHoursPerWeek    Int?
   sortOrder          Int              @default(0)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -122,7 +120,7 @@ model AppSetting {
 model ConstraintRule {
   id               String          @id @default(cuid())
   name             String
-  ruleType         String          // "QUALIFICATION" | "PTO_CONFLICT" | "DAY_OF_WEEK" | "TIME_OVERLAP" | "MUTUAL_EXCLUSION_AND_REST" | "WORKLOAD_CAP"
+  ruleType         String          // "QUALIFICATION" | "PTO_CONFLICT" | "DAY_OF_WEEK" | "TIME_OVERLAP" | "SAME_DAY_EXCLUSION" | "ASSIGNMENT_QUOTA" | "WEEKEND_CAP"
   enforcement      String          @default("SOFT_WARN") // "HARD_BLOCK" | "SOFT_WARN"
   assignmentTypeId String?
   assignmentType   AssignmentType? @relation(fields: [assignmentTypeId], references: [id], onDelete: SetNull)

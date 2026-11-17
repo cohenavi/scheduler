@@ -2,7 +2,7 @@ import { PublishStatus, TimeBlock } from '@prisma/client';
 import { Router } from 'express';
 import { requireAdmin } from '../auth.js';
 import { runAutoScheduler } from '../autoScheduler.js';
-import { evaluateSchedule } from '../constraintEngine.js';
+import { addDaysYMD, evaluateSchedule } from '../constraintEngine.js';
 import { checkCandidateHardBlocks, loadScheduleContext } from '../constraintHelper.js';
 import { prisma } from '../db.js';
 import {
@@ -163,8 +163,6 @@ scheduleRouter.get('/admin', requireAdmin, async (req, res) => {
       name: p.name,
       role: p.role,
       calendarToken: p.calendarToken,
-      maxShiftsPerWeek: p.maxShiftsPerWeek,
-      maxHoursPerWeek: p.maxHoursPerWeek,
       sortOrder: p.sortOrder,
       allowedAssignmentIds: p.allowedAssignments.map((a) => a.id),
     }));
@@ -174,7 +172,8 @@ scheduleRouter.get('/admin', requireAdmin, async (req, res) => {
       allViewUnavails,
       people,
       assignmentTypes,
-      rules
+      rules,
+      startDate && endDate ? { evalStartDate: startDate, evalEndDate: endDate } : undefined
     );
 
     const shifts = dateFilter
@@ -192,7 +191,12 @@ scheduleRouter.get('/admin', requireAdmin, async (req, res) => {
       : allViewUnavails;
 
     const shiftIdSet = new Set(shifts.map((s) => s.id));
-    const violations = allViolations.filter((v) => shiftIdSet.has(v.shiftId));
+    const violations = allViolations.filter((v) => {
+      if (v.shiftId !== null) return shiftIdSet.has(v.shiftId);
+      if (!dateFilter) return true;
+      const weekEnd = addDaysYMD(v.date, 6);
+      return (!startDate || weekEnd >= startDate) && (!endDate || v.date <= endDate);
+    });
 
     res.json({
       people,
